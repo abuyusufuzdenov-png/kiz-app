@@ -351,7 +351,7 @@ body { margin: 0; }
       rows.push({
         r, sticker, order: cell(row, cols.order), brand: cell(row, cols.brand),
         name: cell(row, cols.name), article: cell(row, cols.article),
-        kiz: kizOverride && kizOverride[r] != null ? kizOverride[r] : cell(row, cols.kiz)
+        kiz: normKiz(kizOverride && kizOverride[r] != null ? kizOverride[r] : cell(row, cols.kiz))
       });
     }
     if (!rows.length) throw new Error("В файле нет строк со стикерами.");
@@ -460,8 +460,9 @@ body { margin: 0; }
   }
   function isKiz(v) { return v.includes(GS) || v.length >= 25 || /^01\d{14}21/.test(v); }
   // WB's file import needs GS separators: 01+GTIN+21+serial(13) GS 91+key(4) GS 92+crypto(44)
+  function normKiz(code) { return String(code || "").replace(/[^\x21-\x7e]/g, ""); }
   function withGS(code) {
-    const bare = code.split(GS).join("");
+    const bare = normKiz(code);
     const m = /^(01\d{14}21.{13})(91.{4})(92.{44})$/.exec(bare);
     return m ? m[1] + GS + m[2] + GS + m[3] : bare;
   }
@@ -478,7 +479,7 @@ body { margin: 0; }
       return XLSX.CFB.write(cfb, { fileType: "zip", type: "array" });
     } catch (e) { return out; }
   }
-  function kizKey(v) { return v.replace(new RegExp(GS, "g"), "").slice(0, 31); }
+  function kizKey(v) { return normKiz(v).slice(0, 31); }
   function rowLabel(row) { return "№ " + (row.order || row.sticker); }
 
   function process(input) {
@@ -535,7 +536,7 @@ body { margin: 0; }
   function assignKiz(v) {
     if (state.selected == null) return fail("Сначала отсканируйте стикер заказа, потом КИЗ.");
     // WB accepts codes without GS separators (camera scans include them), so they are dropped
-    v = v.split(GS).join("");
+    v = normKiz(v);
     const bare = v;
     if (/^01\d{14}21/.test(bare) && bare.length !== 31 && bare.length !== 83) {
       return fail("КИЗ считался не полностью (" + bare.length + " симв. вместо 83). Отсканируйте его ещё раз, держа сканер ровно.");
@@ -650,7 +651,7 @@ body { margin: 0; }
       const k = r.article || r.name || "Без артикула";
       if (!map.has(k)) map.set(k, { article: k, name: r.name, codes: [], full: [] });
       map.get(k).codes.push(kizKey(r.kiz));
-      map.get(k).full.push(r.kiz.split(GS).join(""));
+      map.get(k).full.push(normKiz(r.kiz));
     });
     return [...map.values()];
   }
@@ -783,7 +784,7 @@ body { margin: 0; }
     const ws = wb.Sheets[state.sheetName];
     state.rows.forEach((r) => {
       const addr = XLSX.utils.encode_cell({ r: r.r, c: state.cols.kiz });
-      const val = !r.kiz ? "" : state.kizMode === "short" ? kizKey(r.kiz) : state.kizMode === "nogs" ? r.kiz.split(GS).join("") : withGS(r.kiz);
+      const val = !r.kiz ? "" : state.kizMode === "short" ? kizKey(r.kiz) : state.kizMode === "nogs" ? normKiz(r.kiz) : withGS(r.kiz);
       if (val) ws[addr] = { t: "s", v: val };
       else delete ws[addr];
     });
