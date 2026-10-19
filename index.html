@@ -513,7 +513,9 @@ body { margin: 0; }
 
   function assignKiz(v) {
     if (state.selected == null) return fail("Сначала отсканируйте стикер заказа, потом КИЗ.");
-    const bare = v.split(GS).join("");
+    // WB accepts codes without GS separators (camera scans include them), so they are dropped
+    v = v.split(GS).join("");
+    const bare = v;
     if (/^01\d{14}21/.test(bare) && bare.length !== 31 && bare.length !== 83) {
       return fail("КИЗ считался не полностью (" + bare.length + " симв. вместо 83). Отсканируйте его ещё раз, держа сканер ровно.");
     }
@@ -626,7 +628,7 @@ body { margin: 0; }
       const k = r.article || r.name || "Без артикула";
       if (!map.has(k)) map.set(k, { article: k, name: r.name, codes: [], full: [] });
       map.get(k).codes.push(kizKey(r.kiz));
-      map.get(k).full.push(r.kiz);
+      map.get(k).full.push(r.kiz.split(GS).join(""));
     });
     return [...map.values()];
   }
@@ -760,7 +762,7 @@ body { margin: 0; }
       const ws = wb.Sheets[state.sheetName];
       state.rows.forEach((r) => {
         const addr = XLSX.utils.encode_cell({ r: r.r, c: state.cols.kiz });
-        const val = state.kizMode === "short" && r.kiz ? kizKey(r.kiz) : r.kiz;
+        const val = state.kizMode === "short" && r.kiz ? kizKey(r.kiz) : r.kiz.split(GS).join("");
         if (val) ws[addr] = { t: "s", v: val };
         else delete ws[addr];
       });
