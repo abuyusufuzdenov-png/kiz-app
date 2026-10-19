@@ -460,7 +460,9 @@ body { margin: 0; }
   }
   function isKiz(v) { return v.includes(GS) || v.length >= 25 || /^01\d{14}21/.test(v); }
   // WB's file import needs GS separators: 01+GTIN+21+serial(13) GS 91+key(4) GS 92+crypto(44)
-  function normKiz(code) { return String(code || "").replace(/[^\x21-\x7e]/g, ""); }
+  function normKiz(code) {
+    return String(code || "").replace(/_x005F_/gi, "").replace(/_x001D_/gi, "").replace(/[^\x21-\x7e]/g, "");
+  }
   function withGS(code) {
     const bare = normKiz(code);
     const m = /^(01\d{14}21.{13})(91.{4})(92.{44})$/.exec(bare);
@@ -472,8 +474,13 @@ body { margin: 0; }
       const cfb = XLSX.CFB.read(new Uint8Array(out), { type: "array" });
       cfb.FileIndex.forEach((f, i) => {
         if (f.type === 2 && f.content && /\.xml$/.test(cfb.FullPaths[i])) {
-          const t = new TextDecoder().decode(f.content);
-          if (t.indexOf("_x001d_") >= 0) f.content = new TextEncoder().encode(t.replace(/_x001d_/g, "_x001D_"));
+          let t = new TextDecoder().decode(f.content);
+          const before = t;
+          t = t.replace(/_x001d_/g, "_x001D_");
+          // WB decodes "_x001D_" only inside text runs: write string cells as inline strings (<is><t>), not t="str" <v>
+          if (/worksheets\/sheet\d+\.xml$/.test(cfb.FullPaths[i]))
+            t = t.replace(/<c ([^>]*?)t="str"([^>]*)><v>([\s\S]*?)<\/v><\/c>/g, '<c $1t="inlineStr"$2><is><t xml:space="preserve">$3</t></is></c>');
+          if (t !== before) f.content = new TextEncoder().encode(t);
         }
       });
       return XLSX.CFB.write(cfb, { fileType: "zip", type: "array" });
