@@ -135,6 +135,12 @@ h2 { font-size: 17px; margin: 0 0 4px; }
 .gbtns button { padding: 7px 10px; font-size: 13px; }
 .group textarea { width: 100%; min-height: 90px; resize: vertical; font-family: var(--font-mono); font-size: 12px; padding: 8px;
   border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.updxml { border-top: 1px solid var(--line); padding-top: 14px; display: grid; gap: 10px; }
+.updxml h3 { margin: 0; font-size: 16px; }
+.reqgrid { display: grid; gap: 8px 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); }
+.reqgrid label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); min-width: 0; }
+.reqgrid label.wide { grid-column: 1 / -1; }
+.reqgrid input, .reqgrid select { font: inherit; font-size: 14px; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); min-width: 0; width: 100%; }
 .confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
 footer { color: var(--muted); font-size: 13px; max-width: 70ch; }
 footer p { margin: 4px 0; }
@@ -241,6 +247,35 @@ body { margin: 0; }
       <button id="updxlsx" type="button">Скачать коды для УПД (xlsx)</button>
     </div>
     <div class="groups" id="groups"></div>
+    <div class="updxml">
+      <h3>Готовый УПД для СБИС</h3>
+      <p class="file">Один раз загрузите прошлый УПД, выгруженный из СБИС в Excel: приложение возьмёт из него реквизиты и названия товаров. Потом каждый раз нажимайте «Скачать УПД» и загружайте файл в СБИС.</p>
+      <div class="gbtns">
+        <button type="button" id="updtpl">Загрузить прошлый УПД</button>
+        <input type="file" id="updtplfile" class="vh" tabindex="-1" aria-hidden="true" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/octet-stream">
+      </div>
+      <div class="reqgrid">
+        <label>Продавец (ИП)<input id="rq_seller" type="text" placeholder="Фамилия Имя Отчество, ИП"></label>
+        <label>ИНН продавца<input id="rq_sinn" type="text" inputmode="numeric"></label>
+        <label>ОГРНИП<input id="rq_ogrn" type="text" inputmode="numeric"></label>
+        <label>Дата ОГРНИП<input id="rq_ogrnd" type="text" placeholder="дд.мм.гггг"></label>
+        <label class="wide">Адрес продавца<input id="rq_saddr" type="text"></label>
+        <label>Покупатель<input id="rq_buyer" type="text"></label>
+        <label>ИНН покупателя<input id="rq_binn" type="text" inputmode="numeric"></label>
+        <label>КПП покупателя (для ООО)<input id="rq_bkpp" type="text" inputmode="numeric"></label>
+        <label class="wide">Адрес покупателя<input id="rq_baddr" type="text"></label>
+        <label>Номер УПД<input id="rq_num" type="text"></label>
+        <label>Дата УПД<input id="rq_date" type="text" placeholder="дд.мм.гггг"></label>
+        <label>Наименование товара
+          <select id="rq_names">
+            <option value="wb">как на WB</option>
+            <option value="upd">как в прошлом УПД</option>
+          </select>
+        </label>
+      </div>
+      <div class="gbtns"><button type="button" id="updxmlbtn" class="primary">Скачать УПД для СБИС</button></div>
+      <p class="file" id="updxmlinfo"></p>
+    </div>
   </section>
 
   <footer>
@@ -650,6 +685,182 @@ body { margin: 0; }
     }).join("");
   }
 
+  // ---------- UPD XML (ФНС 5.03, КНД 1115131, функция ДОП) ----------
+  const REQ_STORE = "kiz-upd-req-v1";
+  const RQ = ["seller", "sinn", "ogrn", "ogrnd", "saddr", "buyer", "binn", "bkpp", "baddr", "num", "date", "names"];
+  let updNames = {};
+  function todayStr() { const d = new Date(); return String(d.getDate()).padStart(2, "0") + "." + String(d.getMonth() + 1).padStart(2, "0") + "." + d.getFullYear(); }
+  function loadReq() {
+    let r = {};
+    try { r = JSON.parse(localStorage.getItem(REQ_STORE) || "{}"); } catch (e) {}
+    updNames = r.namesMap || {};
+    RQ.forEach((k) => { const el = $("rq_" + k); if (el && r[k] != null) el.value = r[k]; });
+    $("rq_date").value = todayStr();
+    if (!$("rq_num").value) $("rq_num").value = defaultNum();
+    showReqInfo();
+  }
+  function defaultNum() { const d = new Date(); return "К-" + String(d.getDate()).padStart(2, "0") + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getHours()).padStart(2, "0") + String(d.getMinutes()).padStart(2, "0"); }
+  function saveReq() {
+    const r = { namesMap: updNames };
+    RQ.forEach((k) => { if (k !== "date") r[k] = $("rq_" + k).value.trim(); });
+    try { localStorage.setItem(REQ_STORE, JSON.stringify(r)); } catch (e) {}
+  }
+  function showReqInfo() {
+    const n = Object.keys(updNames).length;
+    $("updxmlinfo").textContent = n ? "Названия товаров из прошлого УПД: " + n + " шт. (" + Object.keys(updNames).join(", ") + ")" : "";
+  }
+  RQ.forEach((k) => { const el = $("rq_" + k); if (el) el.addEventListener("change", saveReq); });
+
+  function parsePrevUpd(buf) {
+    const wb = XLSX.read(buf, { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: null });
+    const out = { names: {} };
+    let ctx = "";
+    let inTable = false;
+    for (const row of aoa) {
+      const cells = [];
+      (row || []).forEach((v, c) => { if (v != null && String(v).trim() !== "") cells.push([c, String(v).replace(/\s+/g, " ").trim()]); });
+      if (!cells.length) continue;
+      const first = cells[0][1];
+      const next = cells[1] ? cells[1][1] : "";
+      if (first === "Продавец") { out.seller = next; ctx = "s"; }
+      else if (first === "Покупатель") { out.buyer = next; ctx = "b"; }
+      else if (first === "Адрес" && ctx === "s" && !out.saddr) out.saddr = next;
+      else if (first === "Адрес" && ctx === "b" && !out.baddr) out.baddr = next;
+      else if (first === "ИНН/КПП продавца") out.sinn = next;
+      else if (first === "ИНН/КПП покупателя") out.binn = next;
+      if (cells.some(([, t]) => /^Наименование товара/.test(t))) { inTable = true; continue; }
+      if (inTable && cells.some(([, t]) => /^Всего к оплате/.test(t))) inTable = false;
+      if (inTable && cells.length >= 3 && cells[0][0] === 0 && /^\d+$/.test(cells[1][1]) && !/^\d+$/.test(first) && first.length > 1 && cells[2][1] !== "1а") out.names[first] = cells[2][1];
+      cells.forEach(([, t]) => { const m = /^(\d{15})\s*,\s*(\d{2}\.\d{2}\.\d{4})$/.exec(t); if (m) { out.ogrn = m[1]; out.ogrnd = m[2]; } });
+    }
+    return out;
+  }
+  $("updtpl").addEventListener("click", () => { picking = true; $("updtplfile").click(); setTimeout(() => { picking = false; }, 60000); });
+  $("updtplfile").addEventListener("change", async (e) => {
+    picking = false;
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    try {
+      const r = parsePrevUpd(await f.arrayBuffer());
+      const split = (v) => String(v || "").split("/");
+      if (r.seller) $("rq_seller").value = r.seller;
+      if (r.sinn) $("rq_sinn").value = split(r.sinn)[0].trim();
+      if (r.ogrn) { $("rq_ogrn").value = r.ogrn; $("rq_ogrnd").value = r.ogrnd; }
+      if (r.saddr) $("rq_saddr").value = r.saddr;
+      if (r.buyer) $("rq_buyer").value = r.buyer;
+      if (r.binn) { $("rq_binn").value = split(r.binn)[0].trim(); $("rq_bkpp").value = (split(r.binn)[1] || "").trim(); }
+      if (r.baddr) $("rq_baddr").value = r.baddr;
+      updNames = Object.assign({}, updNames, r.names);
+      saveReq(); showReqInfo();
+      note("ok", "Реквизиты из прошлого УПД загружены. Проверьте поля и нажмите «Скачать УПД для СБИС».");
+    } catch (err) { fail("Не удалось прочитать УПД: " + (err.message || err)); }
+    e.target.value = "";
+  });
+
+  function xmlAttr(v) { return String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;"); }
+  function fio(name) {
+    const parts = String(name || "").replace(/,/g, " ").split(/\s+/).filter((w) => w && !/^ИП$/i.test(w) && !/^индивидуальный$/i.test(w) && !/^предприниматель$/i.test(w));
+    return { f: parts[0] || "", i: parts[1] || "", o: parts.slice(2).join(" ") };
+  }
+  function fioXml(n) { return '<ФИО Фамилия="' + xmlAttr(n.f) + '" Имя="' + xmlAttr(n.i) + '"' + (n.o ? ' Отчество="' + xmlAttr(n.o) + '"' : "") + "/>"; }
+  function partyXml(tag, name, inn, kpp, addr, ogrn, ogrnd) {
+    inn = String(inn || "").replace(/\D/g, "");
+    let id;
+    if (inn.length === 10) {
+      id = '<СвЮЛУч НаимОрг="' + xmlAttr(name) + '" ИННЮЛ="' + inn + '"' + (kpp ? ' КПП="' + xmlAttr(kpp) + '"' : "") + "/>";
+    } else {
+      id = '<СвИП ИННФЛ="' + inn + '"' + (ogrn ? ' ОГРНИП="' + xmlAttr(ogrn) + '"' : "") + (ogrn && ogrnd ? ' ДатаОГРНИП="' + xmlAttr(ogrnd) + '"' : "") + ">" + fioXml(fio(name)) + "</СвИП>";
+    }
+    const a = addr ? '<Адрес><АдрИнф КодСтр="643" НаимСтран="Россия" АдрТекст="' + xmlAttr(addr) + '"/></Адрес>' : "";
+    return "<" + tag + "><ИдСв>" + id + "</ИдСв>" + a + "</" + tag + ">";
+  }
+  function uuid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); });
+  }
+  const CP1251 = (() => {
+    const m = new Map();
+    for (let i = 0; i < 64; i++) m.set(0x410 + i, 0xC0 + i);
+    [[0x401, 0xA8], [0x451, 0xB8], [0x2116, 0xB9], [0xAB, 0xAB], [0xBB, 0xBB], [0x2013, 0x96], [0x2014, 0x97], [0xA0, 0xA0], [0x201C, 0x93], [0x201D, 0x94], [0x201E, 0x84], [0x2019, 0x92], [0x2018, 0x91]].forEach(([u, b]) => m.set(u, b));
+    return m;
+  })();
+  function toCp1251(str) {
+    const out = new Uint8Array(str.length);
+    let n = 0;
+    for (const ch of str) { const c = ch.codePointAt(0); out[n++] = c < 0x80 ? c : (CP1251.get(c) ?? 0x3F); }
+    return out.slice(0, n);
+  }
+  function buildUpdXml() {
+    const g = (k) => $("rq_" + k).value.trim();
+    const miss = [];
+    if (!g("seller")) miss.push("продавец");
+    if (!/^\d{12}$/.test(g("sinn").replace(/\D/g, "")) && !/^\d{10}$/.test(g("sinn").replace(/\D/g, ""))) miss.push("ИНН продавца");
+    if (!g("buyer")) miss.push("покупатель");
+    if (!/^(\d{10}|\d{12})$/.test(g("binn").replace(/\D/g, ""))) miss.push("ИНН покупателя");
+    if (!/^\d{2}\.\d{2}\.\d{4}$/.test(g("date"))) miss.push("дата УПД (дд.мм.гггг)");
+    if (!g("num")) miss.push("номер УПД");
+    if (miss.length) throw new Error("Заполните: " + miss.join(", ") + ".");
+    const groups = updGroups();
+    if (!groups.length) throw new Error("Нет отсканированных КИЗ.");
+    const date = g("date"), [dd, mm, yyyy] = date.split(".");
+    const now = new Date();
+    const time = [now.getHours(), now.getMinutes(), now.getSeconds()].map((x) => String(x).padStart(2, "0")).join(".");
+    const sinn = g("sinn").replace(/\D/g, ""), binn = g("binn").replace(/\D/g, "");
+    const id = "ON_NSCHFDOPPR_" + binn + "_" + sinn + "_" + yyyy + mm + dd + "_" + uuid() + "_0_0_0_0_0_00";
+    const useUpdNames = g("names") === "upd";
+    let lines = "", total = 0;
+    groups.forEach((gr, i) => {
+      const name = (useUpdNames && updNames[gr.article]) || gr.name || gr.article;
+      total += gr.codes.length;
+      lines += '<СведТов НомСтр="' + (i + 1) + '" НаимТов="' + xmlAttr(name) + '" ОКЕИ_Тов="796" НаимЕдИзм="шт" КолТов="' + gr.codes.length + '" НалСт="без НДС" СтТовУчНал="0.00">' +
+        '<ДопСведТов ПрТовРаб="1" КодТов="' + xmlAttr(gr.article) + '"><НомСредИдентТов>' +
+        gr.codes.map((c) => "<КИЗ>" + xmlAttr(c) + "</КИЗ>").join("") +
+        "</НомСредИдентТов></ДопСведТов>" +
+        "<Акциз><БезАкциз>без акциза</БезАкциз></Акциз><СумНал><БезНДС>без НДС</БезНДС></СумНал></СведТов>";
+    });
+    const seller = g("seller");
+    const doc = "Документ об отгрузке товаров (выполнении работ), передаче имущественных прав (документ об оказании услуг)";
+    const xml = '<?xml version="1.0" encoding="windows-1251"?>' +
+      '<Файл ИдФайл="' + id + '" ВерсФорм="5.03" ВерсПрог="КИЗ Сканер 1.0">' +
+      '<Документ КНД="1115131" Функция="ДОП" ПоФактХЖ="' + doc + '" НаимДокОпр="' + doc + '" ДатаИнфПр="' + date + '" ВремИнфПр="' + time + '" НаимЭконСубСост="' + xmlAttr(seller) + '">' +
+      '<СвСчФакт НомерДок="' + xmlAttr(g("num")) + '" ДатаДок="' + date + '">' +
+      partyXml("СвПрод", seller, sinn, "", g("saddr"), g("ogrn").replace(/\D/g, ""), g("ogrnd")) +
+      "<ГрузОт><ОнЖе>он же</ОнЖе></ГрузОт>" +
+      partyXml("ГрузПолуч", g("buyer"), binn, g("bkpp"), g("baddr")) +
+      '<ДокПодтвОтгрНом РеквНаимДок="Универсальный передаточный документ" РеквНомерДок="' + xmlAttr(g("num")) + '" РеквДатаДок="' + date + '"/>' +
+      partyXml("СвПокуп", g("buyer"), binn, g("bkpp"), g("baddr")) +
+      '<ДенИзм КодОКВ="643" НаимОКВ="Российский рубль"/>' +
+      "</СвСчФакт>" +
+      "<ТаблСчФакт>" + lines + '<ВсегоОпл СтТовУчНалВсего="0.00"><СумНалВсего><БезНДС>без НДС</БезНДС></СумНалВсего></ВсегоОпл></ТаблСчФакт>' +
+      '<СвПродПер><СвПер СодОпер="Товары переданы" ДатаПер="' + date + '"><БезДокОснПер>1</БезДокОснПер></СвПер></СвПродПер>' +
+      '<Подписант Должн="Индивидуальный предприниматель" СпосПодтПолном="1">' + fioXml(fio(seller)) + "</Подписант>" +
+      "</Документ></Файл>";
+    return { id, xml, lines: groups.length, total };
+  }
+  $("updxmlbtn").addEventListener("click", async () => {
+    try {
+      saveReq();
+      const { id, xml, lines, total } = buildUpdXml();
+      const bytes = toCp1251(xml);
+      let filename = id + ".xml", data = new Blob([bytes], { type: "application/xml" });
+      if (window.claude) {
+        // the Claude page can only save zip files; inside the zip is the XML itself
+        const cfb = XLSX.CFB.utils.cfb_new();
+        XLSX.CFB.utils.cfb_add(cfb, id + ".xml", bytes);
+        data = new Blob([XLSX.CFB.write(cfb, { fileType: "zip", type: "array" })]);
+        filename = id + ".zip";
+      }
+      if (!downloads) return fail("Скачивание недоступно в этом окне.");
+      await downloads.save({ filename, data });
+      note("ok", "УПД сохранён: " + lines + " строк, " + total + " КИЗ. В СБИС: создайте реализацию → вкладка «Документы» → «Добавить» → выберите этот файл → «Разобрать» → «Универсальный передаточный документ».");
+    } catch (err) {
+      if (err && err.code === "declined") note("warn", "Скачивание отменено.");
+      else fail(err.message || "Не удалось сформировать УПД.");
+    }
+  });
+
   // ---------- codes for UPD ----------
   function updGroups() {
     const map = new Map();
@@ -930,6 +1141,7 @@ body { margin: 0; }
   }
 
   // ---------- boot ----------
+  loadReq();
   if (!restore()) { state.rows = DEMO_ROWS.map((r) => Object.assign({}, r)); }
   render();
   if (!TOUCH) scan.focus();
