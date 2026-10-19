@@ -189,6 +189,7 @@ body { margin: 0; }
       <input type="file" id="file" class="vh" tabindex="-1" aria-hidden="true" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/octet-stream">
       <button id="undo" type="button" disabled>Отменить последний</button>
       <button id="export" class="primary" type="button" disabled>Скачать xlsx</button>
+      <button id="share" type="button" hidden disabled>Отправить файл</button>
     </div>
   </header>
 
@@ -611,6 +612,7 @@ body { margin: 0; }
     $("demo").hidden = !state.demo;
     $("fileinfo").textContent = state.demo ? "Пример. Загрузите файл sgtin из кабинета WB" : state.fileName + " · лист «" + state.sheetName + "»";
     $("export").disabled = state.demo || !done;
+    $("share").hidden = !CAN_SHARE; $("share").disabled = state.demo || !done;
     $("undo").disabled = !state.history.length;
 
     const step = $("step");
@@ -776,21 +778,24 @@ body { margin: 0; }
       return { status: "saved" };
     }
   };
+  function buildWbFile() {
+    const wb = XLSX.read(b64ToBuf(state.b64), { type: "array" });
+    const ws = wb.Sheets[state.sheetName];
+    state.rows.forEach((r) => {
+      const addr = XLSX.utils.encode_cell({ r: r.r, c: state.cols.kiz });
+      const val = !r.kiz ? "" : state.kizMode === "short" ? kizKey(r.kiz) : state.kizMode === "nogs" ? r.kiz.split(GS).join("") : withGS(r.kiz);
+      if (val) ws[addr] = { t: "s", v: val };
+      else delete ws[addr];
+    });
+    const range = XLSX.utils.decode_range(ws["!ref"]);
+    range.e.c = Math.max(range.e.c, state.cols.kiz);
+    ws["!ref"] = XLSX.utils.encode_range(range);
+    const out = fixGsEscapes(XLSX.write(wb, { bookType: "xlsx", type: "array" }));
+    return { name: state.fileName.replace(/\.xlsx?$/i, "") + ".xlsx", out };
+  }
   $("export").addEventListener("click", async () => {
     try {
-      const wb = XLSX.read(b64ToBuf(state.b64), { type: "array" });
-      const ws = wb.Sheets[state.sheetName];
-      state.rows.forEach((r) => {
-        const addr = XLSX.utils.encode_cell({ r: r.r, c: state.cols.kiz });
-        const val = !r.kiz ? "" : state.kizMode === "short" ? kizKey(r.kiz) : state.kizMode === "nogs" ? r.kiz.split(GS).join("") : withGS(r.kiz);
-        if (val) ws[addr] = { t: "s", v: val };
-        else delete ws[addr];
-      });
-      const range = XLSX.utils.decode_range(ws["!ref"]);
-      range.e.c = Math.max(range.e.c, state.cols.kiz);
-      ws["!ref"] = XLSX.utils.encode_range(range);
-      const out = fixGsEscapes(XLSX.write(wb, { bookType: "xlsx", type: "array" }));
-      const name = state.fileName.replace(/\.xlsx?$/i, "") + ".xlsx";
+      const { name, out } = buildWbFile();
       if (!downloads) return fail("Скачивание недоступно в этом браузере.");
       await downloads.save({ filename: name, data: new Blob([out]) });
       note("ok", "Файл " + name + " сохранён. Его можно загружать в кабинет WB.");
@@ -799,6 +804,20 @@ body { margin: 0; }
       else fail("Не удалось сохранить файл" + (err && err.message ? ": " + err.message : "."));
     }
     scan.focus({ preventScroll: true });
+  });
+  // Send the file to another device (Telegram, WhatsApp, mail) — works in the standalone app on phones
+  const CAN_SHARE = !window.claude && typeof navigator.canShare === "function";
+  $("share").addEventListener("click", async () => {
+    try {
+      const { name, out } = buildWbFile();
+      const file = new File([out], name, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      if (!navigator.canShare({ files: [file] })) return fail("Этот браузер не умеет отправлять файлы. Скачайте файл и отправьте его вручную.");
+      await navigator.share({ files: [file], title: name });
+      note("ok", "Файл отправлен. На другом устройстве откройте приложение и загрузите его кнопкой «Загрузить файл»: все КИЗ подтянутся.");
+    } catch (err) {
+      if (err && err.name === "AbortError") return;
+      fail("Не удалось отправить файл" + (err && err.message ? ": " + err.message : "."));
+    }
   });
 
   // ---------- camera ----------
