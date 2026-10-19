@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>КИЗ Сканер</title>
+<meta name="theme-color" content="#1d5d86">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a packing-station tool. Sticky scan bar on top, current-order card, then the order table. */
+:root {
+  --bg: #eef1f0;
+  --panel: #ffffff;
+  --ink: #17221d;
+  --muted: #5d6b64;
+  --line: #d5dcd8;
+  --accent: #1d5d86;
+  --accent-soft: #e2edf5;
+  --ok: #1d7a4a;
+  --ok-soft: #e1f3e8;
+  --warn: #9a6400;
+  --warn-soft: #fbf0d9;
+  --err: #b3261e;
+  --err-soft: #fbe3e1;
+  --sel: #fff6c9;
+  --font-body: "IBM Plex Sans", "Segoe UI", Roboto, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121815; --panel: #1b231f; --ink: #e6ece9; --muted: #98a59f; --line: #2e3a34;
+  --accent: #7db8e0; --accent-soft: #1d2d39; --ok: #6fd19b; --ok-soft: #173325;
+  --warn: #e9b65a; --warn-soft: #362a12; --err: #ff8a80; --err-soft: #3b1a18; --sel: #3a3416;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #121815; --panel: #1b231f; --ink: #e6ece9; --muted: #98a59f; --line: #2e3a34;
+  --accent: #7db8e0; --accent-soft: #1d2d39; --ok: #6fd19b; --ok-soft: #173325;
+  --warn: #e9b65a; --warn-soft: #362a12; --err: #ff8a80; --err-soft: #3b1a18; --sel: #3a3416;
+  color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.45; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 16px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+.wrap > * { min-width: 0; }
+select { max-width: 100%; }
+.opts label { min-width: 0; flex-wrap: wrap; }
+
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; justify-content: space-between; }
+h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
+.file { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, .btn { font: inherit; font-weight: 600; font-size: 14px; border-radius: 8px; padding: 9px 14px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink); display: inline-flex; align-items: center; gap: 6px; }
+button:hover, .btn:hover { border-color: var(--accent); }
+button:focus-visible, .btn:focus-within, input:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.vh { position: fixed; left: -9999px; top: 0; width: 1px; height: 1px; opacity: 0; }
+
+.progress { display: flex; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.bar { width: 140px; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--ok); width: 0; transition: width .2s; }
+
+.station { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: 16px; display: grid; gap: 12px; box-shadow: 0 6px 18px -12px rgba(0,0,0,.35); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.scanrow { display: flex; gap: 10px; flex-wrap: wrap; }
+#scan { flex: 1 1 320px; min-width: 0; font-family: var(--font-mono); font-size: 20px; padding: 12px 14px; border-radius: 10px;
+  border: 2px solid var(--accent); background: var(--bg); color: var(--ink); }
+#scan.idle { border-color: var(--err); }
+.focushint { width: 100%; justify-content: center; font-size: 16px; padding: 14px; background: var(--err-soft); color: var(--err); border-color: var(--err); }
+.lastscan { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.lastscan .mono { color: var(--ink); }
+
+.step { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; align-items: start; padding: 14px; border-radius: 10px; background: var(--accent-soft); }
+.step .badge { grid-row: span 2; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+  font-weight: 700; font-size: 18px; background: var(--accent); color: var(--panel); }
+.step .title { font-size: 20px; font-weight: 700; text-wrap: balance; }
+.step .sub { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.step.kiz { background: var(--sel); }
+.step.kiz .badge { background: var(--warn); }
+.step .sub b { color: var(--ink); }
+.mono { font-family: var(--font-mono); }
+
+.msg { padding: 10px 14px; border-radius: 8px; font-weight: 500; overflow-wrap: anywhere; }
+.msg.ok { background: var(--ok-soft); color: var(--ok); }
+.msg.err { background: var(--err-soft); color: var(--err); }
+.msg.warn { background: var(--warn-soft); color: var(--warn); }
+
+.opts { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 13px; color: var(--muted); }
+.opts label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+select { font: inherit; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+
+.demo { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 10px 14px; font-weight: 500; }
+
+.tablebox { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; min-width: 760px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; background: var(--panel); }
+td { font-size: 14px; }
+td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.name { max-width: 280px; }
+td.name small { display: block; color: var(--muted); font-size: 12px; }
+td.kizcell { font-family: var(--font-mono); font-size: 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs { color: var(--warn); }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--bg); }
+tr.done td:first-child { box-shadow: inset 4px 0 0 var(--ok); }
+tr.sel { background: var(--sel) !important; }
+tr.sel td:first-child { box-shadow: inset 4px 0 0 var(--warn); }
+tr.flash { animation: flash 1s ease-out; }
+@keyframes flash { from { background: var(--ok-soft); } to { background: transparent; } }
+.chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.chip.ok { background: var(--ok-soft); color: var(--ok); }
+.chip.wait { background: var(--bg); color: var(--muted); }
+.sticker-hi { background: var(--accent-soft); border-radius: 3px; padding: 0 2px; }
+.x { border: none; background: none; padding: 2px 6px; color: var(--muted); font-size: 16px; }
+.x:hover { color: var(--err); }
+
+.upd { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 14px; }
+.updhead { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: flex-start; }
+.updhead > div { min-width: 0; flex: 1 1 320px; }
+h2 { font-size: 17px; margin: 0 0 4px; }
+.groups { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
+.group { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 8px; min-width: 0; }
+.group .gh { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.group .gh b { font-size: 15px; }
+.group .gn { font-size: 12px; color: var(--muted); }
+.gbtns { display: flex; flex-wrap: wrap; gap: 6px; }
+.gbtns button { padding: 7px 10px; font-size: 13px; }
+.group textarea { width: 100%; min-height: 90px; resize: vertical; font-family: var(--font-mono); font-size: 12px; padding: 8px;
+  border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
+footer { color: var(--muted); font-size: 13px; max-width: 70ch; }
+footer p { margin: 4px 0; }
+@media (prefers-reduced-motion: reduce) { tr.flash { animation: none; } .bar i { transition: none; } }
+@media (max-width: 560px) { h1 { font-size: 18px; } .step .title { font-size: 17px; } #scan { font-size: 17px; } }
+
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; }
+[hidden] { display: none !important; }
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+#cam { font-size: 16px; padding: 12px 18px; }
+.cam { position: fixed; inset: 0; z-index: 50; background: #000; display: flex; flex-direction: column; }
+.cam video { flex: 1; width: 100%; min-height: 0; object-fit: cover; }
+.camframe { position: absolute; left: 50%; top: 42%; width: min(70vw, 320px); aspect-ratio: 1; transform: translate(-50%, -50%);
+  border: 3px solid rgba(255,255,255,.85); border-radius: 16px; box-shadow: 0 0 0 9999px rgba(0,0,0,.25); pointer-events: none; }
+.campanel { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px max(16px, env(safe-area-inset-left, 0px)) calc(14px + env(safe-area-inset-bottom, 0px));
+  background: rgba(10,14,12,.88); color: #fff; display: grid; gap: 10px; }
+.camstatus { font-size: 18px; font-weight: 700; }
+.camsub { font-size: 14px; color: #c9d3ce; overflow-wrap: anywhere; }
+.cammsg { font-size: 15px; font-weight: 600; padding: 8px 12px; border-radius: 8px; overflow-wrap: anywhere; }
+.cammsg.ok { background: #1d7a4a; } .cammsg.err { background: #b3261e; } .cammsg.warn { background: #9a6400; }
+.cambtns { display: flex; gap: 10px; }
+.cambtns button { flex: 1; justify-content: center; font-size: 16px; padding: 12px; background: #24302a; color: #fff; border-color: #3a4a42; }
+.camflash { position: absolute; inset: 0; background: #2ecc71; opacity: 0; pointer-events: none; transition: opacity .25s; }
+.camflash.on { opacity: .35; transition: none; }
+@media (max-width: 640px) {
+  .actions { width: 100%; }
+  .actions button { flex: 1 1 auto; justify-content: center; }
+  .progress { width: 100%; justify-content: space-between; }
+  .bar { flex: 1; }
+  table { min-width: 0; }
+  thead { display: none; }
+  tbody tr { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  tbody td { border: none; padding: 0; }
+  td.name, td.kizcell { grid-column: 1 / -1; max-width: none; }
+  .station { position: static; }
+  footer { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>КИЗ Сканер</h1>
+      <div class="file" id="fileinfo">Пример. Загрузите файл sgtin из кабинета WB</div>
+    </div>
+    <div class="actions">
+      <div class="progress"><span id="count">0 / 0</span><span class="bar"><i id="barfill"></i></span></div>
+      <button type="button" id="pick">Загрузить файл</button>
+      <input type="file" id="file" class="vh" tabindex="-1" aria-hidden="true" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/octet-stream">
+      <button id="undo" type="button" disabled>Отменить последний</button>
+      <button id="export" class="primary" type="button" disabled>Скачать xlsx</button>
+    </div>
+  </header>
+
+  <div class="demo" id="demo">Сейчас на странице пример из трёх выдуманных заданий. Загрузите свой файл template-sgtin, чтобы начать работу.</div>
+
+  <section class="station" aria-live="polite">
+    <div class="scanrow">
+      <input id="scan" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+        placeholder="Сканируйте стикер или КИЗ, либо введите цифры стикера + Enter" aria-label="Поле сканера">
+      <button type="button" id="cam" class="primary">Камера</button>
+    </div>
+    <button type="button" class="focushint" id="focushint" hidden>Сканер сейчас не попадает на страницу. Нажмите сюда, затем сканируйте.</button>
+    <div class="lastscan" id="lastscan" hidden></div>
+    <div class="step" id="step"></div>
+    <div class="msg" id="msg" hidden></div>
+    <div class="opts">
+      <label>Формат КИЗ в файле
+        <select id="kizmode">
+          <option value="full">Полный код, как отсканирован</option>
+          <option value="short">Первые 31 символ (GTIN + серийный номер)</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="sound" checked> Звук</label>
+      <label><input type="checkbox" id="layoutfix" checked> Исправлять русскую раскладку</label>
+      <label><input type="checkbox" id="nokbd"> Скрыть экранную клавиатуру (для сканера на телефоне)</label>
+    </div>
+  </section>
+
+  <div class="tablebox">
+    <table>
+      <thead><tr><th>№ задания</th><th>Стикер</th><th>Товар</th><th>Артикул</th><th>КИЗ</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <section class="upd" id="upd" hidden>
+    <div class="updhead">
+      <div>
+        <h2>Коды для УПД в СБИС</h2>
+        <p class="file">В СБИС: строка товара → «Коды» → «загрузить из файла» → выберите файл этого артикула.</p>
+        <label class="file">Вид кода в файле
+          <select id="updform">
+            <option value="short">Короткий, 31 символ (01 + GTIN + 21 + серийный номер)</option>
+            <option value="full">Полный, с криптохвостом</option>
+          </select>
+        </label>
+      </div>
+      <button id="updxlsx" type="button">Скачать коды для УПД (xlsx)</button>
+    </div>
+    <div class="groups" id="groups"></div>
+  </section>
+
+  <footer>
+    <p>Порядок работы: сканируете стикер заказа, строка подсвечивается жёлтым, затем сканируете КИЗ (Data Matrix «Честного знака»). Код записывается в эту строку, и можно сканировать следующий стикер.</p>
+    <p>Если сканер не читает стикер, введите цифры под штрихкодом (хватит последних 4–5) и нажмите Enter. Можно также просто нажать на строку.</p>
+    <p>На телефоне нажмите «Камера» и наводите камеру по очереди: стикер заказа, затем Data Matrix на товаре. Камера остаётся открытой, можно идти по всем заказам подряд.</p>
+    <p>Прогресс хранится в этом браузере, поэтому после случайной перезагрузки страницы работа не потеряется.</p>
+  </footer>
+</div>
+
+<div id="camview" class="cam" hidden>
+  <video id="video" playsinline muted autoplay></video>
+  <div class="camframe"></div>
+  <div class="camflash" id="camflash"></div>
+  <div class="campanel">
+    <div class="camstatus" id="camstatus"></div>
+    <div class="camsub" id="camsub"></div>
+    <div class="cammsg" id="cammsg" hidden></div>
+    <div class="cambtns"><button type="button" id="torch" hidden>Фонарик</button><button type="button" id="camclose">Закрыть</button></div>
+  </div>
+</div>
+<script src="xlsx.full.min.js"></script>
+<script>
+(function () {
+  const STORE = "kiz-station-v1";
+  const GS = "\x1d";
+  const $ = (id) => document.getElementById(id);
+  const scan = $("scan");
+
+  let state = {
+    demo: true, fileName: "", b64: "", sheetName: "", cols: {}, rows: [],
+    selected: null, history: [], kizMode: "full"
+  };
+
+  const DEMO_ROWS = [
+    { r: 1, order: "1000000001", sticker: "10000000011234", brand: "Пример", name: "Шапка (пример)", article: "demo-hat", kiz: "" },
+    { r: 2, order: "1000000002", sticker: "10000000025678", brand: "Пример", name: "Платье (пример)", article: "demo-dress", kiz: "" },
+    { r: 3, order: "1000000003", sticker: "10000000039012", brand: "Пример", name: "Шапка (пример)", article: "demo-hat", kiz: "0104601234567890215ABCdef!" + GS + "93XyZ1" }
+  ];
+
+  // ---------- storage ----------
+  function save() {
+    if (state.demo) return;
+    try {
+      const kiz = {};
+      state.rows.forEach((row) => { if (row.kiz) kiz[row.r] = row.kiz; });
+      localStorage.setItem(STORE, JSON.stringify({ fileName: state.fileName, b64: state.b64, kiz, kizMode: state.kizMode }));
+    } catch (e) {}
+  }
+  function restore() {
+    try {
+      const raw = localStorage.getItem(STORE);
+      if (!raw) return false;
+      const s = JSON.parse(raw);
+      if (!s.b64) return false;
+      loadBuffer(b64ToBuf(s.b64), s.fileName, s.kiz || {});
+      if (s.kizMode) { state.kizMode = s.kizMode; $("kizmode").value = s.kizMode; }
+      return true;
+    } catch (e) { return false; }
+  }
+  function bufToB64(buf) {
+    const bytes = new Uint8Array(buf); let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  function b64ToBuf(b64) {
+    const s = atob(b64); const a = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
+    return a.buffer;
+  }
+
+  // ---------- parsing ----------
+  function findCol(header, tests) {
+    for (let c = 0; c < header.length; c++) {
+      const h = String(header[c] == null ? "" : header[c]).toLowerCase().trim();
+      if (tests.some((t) => h.includes(t))) return c;
+    }
+    return -1;
+  }
+  function loadBuffer(buf, fileName, kizOverride) {
+    if (typeof XLSX === "undefined") throw new Error("Библиотека для чтения Excel не загрузилась. Обновите страницу.");
+    const wb = XLSX.read(buf, { type: "array" });
+    let found = null;
+    for (const name of wb.SheetNames) {
+      const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null });
+      for (let r = 0; r < Math.min(aoa.length, 15); r++) {
+        const row = aoa[r] || [];
+        const sc = findCol(row, ["стикер"]), kc = findCol(row, ["киз"]);
+        if (sc >= 0 && kc >= 0) { found = { name, aoa, hr: r, sc, kc }; break; }
+      }
+      if (found) break;
+    }
+    if (!found) throw new Error("В файле не нашлись колонки «Стикер» и «КИЗ». Это точно шаблон sgtin из кабинета WB?");
+    const header = found.aoa[found.hr];
+    const cols = {
+      sticker: found.sc, kiz: found.kc,
+      order: findCol(header, ["задани"]),
+      brand: findCol(header, ["бренд"]),
+      name: findCol(header, ["наименование"]),
+      article: findCol(header, ["артикул"])
+    };
+    const cell = (row, c) => (c >= 0 && row[c] != null ? String(row[c]).trim() : "");
+    const rows = [];
+    for (let r = found.hr + 1; r < found.aoa.length; r++) {
+      const row = found.aoa[r] || [];
+      const sticker = cell(row, cols.sticker);
+      if (!sticker) continue;
+      rows.push({
+        r, sticker, order: cell(row, cols.order), brand: cell(row, cols.brand),
+        name: cell(row, cols.name), article: cell(row, cols.article),
+        kiz: kizOverride && kizOverride[r] != null ? kizOverride[r] : cell(row, cols.kiz)
+      });
+    }
+    if (!rows.length) throw new Error("В файле нет строк со стикерами.");
+    state = Object.assign(state, {
+      demo: false, fileName, b64: bufToB64(buf), sheetName: found.name, cols, rows, selected: null, history: []
+    });
+  }
+
+  // ---------- scanner input: layout-independent ----------
+  const US = {
+    Backquote: ["`", "~"], Minus: ["-", "_"], Equal: ["=", "+"], BracketLeft: ["[", "{"], BracketRight: ["]", "}"],
+    Backslash: ["\\", "|"], Semicolon: [";", ":"], Quote: ["'", '"'], Comma: [",", "<"], Period: [".", ">"], Slash: ["/", "?"],
+    Space: [" ", " "], IntlBackslash: ["\\", "|"],
+    Digit1: ["1", "!"], Digit2: ["2", "@"], Digit3: ["3", "#"], Digit4: ["4", "$"], Digit5: ["5", "%"],
+    Digit6: ["6", "^"], Digit7: ["7", "&"], Digit8: ["8", "*"], Digit9: ["9", "("], Digit0: ["0", ")"],
+    NumpadDivide: ["/", "/"], NumpadMultiply: ["*", "*"], NumpadSubtract: ["-", "-"], NumpadAdd: ["+", "+"], NumpadDecimal: [".", "."]
+  };
+  function charFromCode(e) {
+    const code = e.code || "";
+    let m = /^Key([A-Z])$/.exec(code);
+    if (m) {
+      const caps = e.getModifierState && e.getModifierState("CapsLock");
+      return (e.shiftKey !== !!caps) ? m[1] : m[1].toLowerCase();
+    }
+    m = /^Numpad(\d)$/.exec(code);
+    if (m) return m[1];
+    if (US[code]) return US[code][e.shiftKey ? 1 : 0];
+    return null;
+  }
+  function insert(ch) {
+    const s = scan.selectionStart ?? scan.value.length, en = scan.selectionEnd ?? scan.value.length;
+    scan.setRangeText(ch, s, en, "end");
+  }
+  // Raw key events of the current scan. If the Russian layout was on (Cyrillic chars arrived),
+  // the whole scan is rebuilt from physical keys; otherwise the typed text is used as is.
+  let evbuf = [], pasted = false;
+  function resolved() {
+    const v = scan.value;
+    if (!$("layoutfix").checked || pasted) return v;
+    const ru = evbuf.some((x) => x.key && /[^\x00-\x7f]/.test(x.key));
+    if (!ru) return v;
+    return evbuf.map((x) => x.gs ? GS : (charFromCode(x.ev) ?? x.key)).join("");
+  }
+  function resetBuf() { evbuf = []; pasted = false; }
+  scan.addEventListener("paste", () => { pasted = true; });
+  scan.addEventListener("input", () => { if (!scan.value) resetBuf(); });
+  scan.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === "Tab") {
+      sawEnter = true; clearTimeout(autoTimer);
+      if (scan.value.trim() || e.key === "Enter") { e.preventDefault(); const v = resolved(); scan.value = ""; resetBuf(); process(v); }
+      return;
+    }
+    // GS separator from scanners comes as Ctrl+] or as a raw GS char
+    if ((e.ctrlKey && (e.code === "BracketRight" || e.key === "]" || e.key === "ъ")) || e.key === GS || e.keyCode === 29) {
+      e.preventDefault(); insert(GS); evbuf.push({ gs: true }); return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "Backspace" || e.key === "Delete") { pasted = true; return; }
+    if (e.key && e.key.length === 1) {
+      evbuf.push({ key: e.key, ev: { code: e.code, shiftKey: e.shiftKey, getModifierState: () => !!(e.getModifierState && e.getModifierState("CapsLock")) } });
+    }
+  });
+  // Scanners that don't send Enter: if characters arrived at scanner speed, submit after a short pause
+  let lastKey = 0, fastCount = 0, autoTimer = null, sawEnter = false;
+  scan.addEventListener("input", () => {
+    const now = performance.now();
+    if (now - lastKey < 60) fastCount++; else fastCount = 0;
+    lastKey = now;
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(() => {
+      if (!sawEnter && fastCount >= 5 && scan.value.trim().length >= 6) { const v = resolved(); scan.value = ""; resetBuf(); process(v); }
+      fastCount = 0;
+    }, 700);
+  });
+  const TOUCH = matchMedia("(pointer: coarse)").matches;
+  function checkFocus() {
+    if (TOUCH) { $("focushint").hidden = true; scan.classList.remove("idle"); return; }
+    const active = document.hasFocus() && document.activeElement === scan;
+    $("focushint").hidden = active;
+    scan.classList.toggle("idle", !active);
+  }
+  setInterval(checkFocus, 500);
+  $("focushint").addEventListener("click", () => scan.focus());
+  scan.addEventListener("focus", checkFocus);
+  let picking = false;
+  $("pick").addEventListener("click", () => {
+    picking = true;
+    $("file").click();
+    setTimeout(() => { picking = false; }, 60000);
+  });
+  scan.addEventListener("blur", () => {
+    setTimeout(() => {
+      if (picking || TOUCH || camOn) return;
+      const a = document.activeElement;
+      if (a === scan) return;
+      if (a && (a.tagName === "SELECT" || a.tagName === "INPUT" || a.tagName === "BUTTON")) return;
+      scan.focus({ preventScroll: true });
+    }, 150);
+  });
+
+  // ---------- core logic ----------
+  function clean(v) {
+    let s = String(v).replace(/[\r\n]/g, "");
+    s = s.replace(/^\](d2|C1|Q3|e0)/, "");   // AIM prefixes some scanners add
+    return s.trim();
+  }
+  function isKiz(v) { return v.includes(GS) || v.length >= 25 || /^01\d{14}21/.test(v); }
+  function kizKey(v) { return v.replace(new RegExp(GS, "g"), "").slice(0, 31); }
+  function rowLabel(row) { return "№ " + (row.order || row.sticker); }
+
+  function process(input) {
+    const v = clean(input);
+    if (!v) return;
+    const ls = $("lastscan");
+    ls.innerHTML = 'Последний скан: <span class="mono">' + kizHtml(v) + "</span> (" + v.length + " симв.)";
+    ls.hidden = false;
+    if (state.demo) return fail("Сейчас загружен пример, а не ваш файл. Нажмите «Загрузить файл» и выберите template-sgtin из WB.");
+    if (isKiz(v)) return assignKiz(v);
+    return findSticker(v);
+  }
+
+  // WB sticker barcode: "*" + base64 of (sticker number * 256 + check byte), e.g. *DcLQ5xon -> 59103045402
+  const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  function decodeWbSticker(v) {
+    const m = /^[*!]([A-Za-z0-9+\/]{6,10})$/.exec(v);
+    if (!m) return null;
+    let n = 0;
+    for (const ch of m[1]) n = n * 64 + B64.indexOf(ch);
+    return String(Math.floor(n / 256));
+  }
+
+  function findSticker(v) {
+    const decoded = decodeWbSticker(v);
+    if (decoded) {
+      $("lastscan").innerHTML += ' → стикер <span class="mono">' + decoded + "</span>";
+      const hit = state.rows.findIndex((r) => r.sticker === decoded);
+      if (hit >= 0) return select(hit, true);
+      return fail("Стикер " + decoded + " не найден в этом файле. Проверьте, что загружен свежий файл с этими заданиями.");
+    }
+    const digits = v.replace(/\D/g, "");
+    if (!digits) return fail("Код «" + v + "» не похож ни на стикер, ни на КИЗ. Введите цифры под штрихкодом стикера.");
+    let hits = state.rows.filter((r) => r.sticker === digits || r.order === digits);
+    if (!hits.length && digits.length >= 4) hits = state.rows.filter((r) => r.sticker.endsWith(digits));
+    if (!hits.length && digits.length >= 4) hits = state.rows.filter((r) => r.sticker.includes(digits) || (digits.length >= 8 && digits.includes(r.sticker)));
+    if (hits.length === 1) return select(state.rows.indexOf(hits[0]), true);
+    if (hits.length > 1) return fail("Под «" + digits + "» подходит " + hits.length + " задания. Введите больше цифр.");
+    return fail("Стикер " + digits + " не найден в этом файле. Проверьте, что загружен файл с нужными заданиями.");
+  }
+
+  function select(idx, fromScan) {
+    state.selected = idx;
+    const row = state.rows[idx];
+    render();
+    const tr = document.querySelector('tr[data-i="' + idx + '"]');
+    if (tr) tr.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    if (row.kiz) note("warn", "У задания " + rowLabel(row) + " уже есть КИЗ. Новый скан КИЗ заменит его.");
+    else hideMsg();
+    if (fromScan) beep(true);
+    scan.focus({ preventScroll: true });
+  }
+
+  function assignKiz(v) {
+    if (state.selected == null) return fail("Сначала отсканируйте стикер заказа, потом КИЗ.");
+    const bare = v.split(GS).join("");
+    if (/^01\d{14}21/.test(bare) && bare.length !== 31 && bare.length !== 83) {
+      return fail("КИЗ считался не полностью (" + bare.length + " симв. вместо 83). Отсканируйте его ещё раз, держа сканер ровно.");
+    }
+    const row = state.rows[state.selected];
+    const key = kizKey(v);
+    const dup = state.rows.find((r) => r !== row && r.kiz && kizKey(r.kiz) === key);
+    if (dup) return fail("Этот КИЗ уже привязан к заданию " + rowLabel(dup) + ". Отсканируйте другой код.");
+    const value = state.kizMode === "short" ? key : v;
+    state.history.push({ i: state.selected, prev: row.kiz });
+    const replaced = !!row.kiz;
+    row.kiz = value;
+    const i = state.selected;
+    state.selected = null;
+    save(); render();
+    const tr = document.querySelector('tr[data-i="' + i + '"]');
+    if (tr) { tr.classList.remove("flash"); void tr.offsetWidth; tr.classList.add("flash"); }
+    const left = state.rows.filter((r) => !r.kiz).length;
+    note("ok", (replaced ? "КИЗ заменён: " : "КИЗ записан: ") + rowLabel(row) + ", " + (row.article || "") +
+      (left ? ". Осталось " + left + ". Сканируйте следующий стикер." : ". Все задания заполнены, можно скачивать файл."));
+    beep(true);
+  }
+
+  function clearKiz(i) {
+    const row = state.rows[i];
+    if (!row.kiz) return;
+    state.history.push({ i, prev: row.kiz });
+    row.kiz = "";
+    save(); render();
+    note("warn", "КИЗ удалён у задания " + rowLabel(row) + ".");
+  }
+
+  function undo() {
+    const h = state.history.pop();
+    if (!h) return;
+    state.rows[h.i].kiz = h.prev;
+    state.selected = null;
+    save(); render();
+    note("warn", "Отменено: " + rowLabel(state.rows[h.i]) + (h.prev ? ", вернулся прежний КИЗ." : ", КИЗ снова пустой."));
+    scan.focus({ preventScroll: true });
+  }
+
+  // ---------- feedback ----------
+  function note(kind, text) { const m = $("msg"); m.className = "msg " + kind; m.textContent = text; m.hidden = false; }
+  function hideMsg() { $("msg").hidden = true; }
+  function fail(text) { note("err", text); beep(false); }
+  let ac = null;
+  function beep(ok) {
+    if (!$("sound").checked) return;
+    try {
+      ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+      const play = (f, t0, d) => {
+        const o = ac.createOscillator(), g = ac.createGain();
+        o.type = ok ? "sine" : "square"; o.frequency.value = f;
+        g.gain.setValueAtTime(0.12, ac.currentTime + t0); g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + t0 + d);
+        o.connect(g); g.connect(ac.destination); o.start(ac.currentTime + t0); o.stop(ac.currentTime + t0 + d);
+      };
+      if (ok) play(1320, 0, 0.09); else { play(220, 0, 0.18); play(180, 0.2, 0.25); }
+    } catch (e) {}
+  }
+
+  // ---------- render ----------
+  function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+  function kizHtml(k) { return esc(k).split(GS).join('<span class="gs" title="Разделитель GS">␝</span>'); }
+  function stickerHtml(s) {
+    if (s.length > 4) return esc(s.slice(0, -4)) + '<span class="sticker-hi">' + esc(s.slice(-4)) + "</span>";
+    return esc(s);
+  }
+
+  function render() {
+    const done = state.rows.filter((r) => r.kiz).length, total = state.rows.length;
+    $("count").textContent = done + " / " + total;
+    $("barfill").style.width = total ? (done / total * 100) + "%" : "0";
+    $("demo").hidden = !state.demo;
+    $("fileinfo").textContent = state.demo ? "Пример. Загрузите файл sgtin из кабинета WB" : state.fileName + " · лист «" + state.sheetName + "»";
+    $("export").disabled = state.demo || !done;
+    $("undo").disabled = !state.history.length;
+
+    const step = $("step");
+    if (state.selected == null) {
+      step.className = "step";
+      step.innerHTML = '<div class="badge">1</div><div class="title">Сканируйте стикер заказа</div>' +
+        '<div class="sub">Строка с этим заданием подсветится, после этого сканируйте КИЗ.</div>';
+    } else {
+      const r = state.rows[state.selected];
+      step.className = "step kiz";
+      step.innerHTML = '<div class="badge">2</div><div class="title">Сканируйте КИЗ для ' + esc(r.article || "товара") + "</div>" +
+        '<div class="sub">' + esc(r.name) + ' · задание <b class="mono">' + esc(r.order) + '</b> · стикер <b class="mono">' + esc(r.sticker) + "</b></div>";
+    }
+
+    renderUpd();
+    const tb = $("rows");
+    tb.innerHTML = state.rows.map((r, i) => {
+      const cls = [r.kiz ? "done" : "", state.selected === i ? "sel" : ""].join(" ");
+      return '<tr data-i="' + i + '" class="' + cls + '">' +
+        '<td class="num">' + esc(r.order) + "</td>" +
+        '<td class="num">' + stickerHtml(r.sticker) + "</td>" +
+        '<td class="name">' + esc(r.name) + (r.brand ? "<small>" + esc(r.brand) + "</small>" : "") + "</td>" +
+        "<td>" + esc(r.article) + "</td>" +
+        '<td class="kizcell" title="' + esc(r.kiz.split(GS).join("␝")) + '">' +
+          (r.kiz ? kizHtml(r.kiz) : '<span class="chip wait">ждёт КИЗ</span>') + "</td>" +
+        "<td>" + (r.kiz ? '<button class="x" type="button" data-clear="' + i + '" aria-label="Удалить КИЗ">×</button>' : "") + "</td></tr>";
+    }).join("");
+  }
+
+  // ---------- codes for UPD ----------
+  function updGroups() {
+    const map = new Map();
+    state.rows.forEach((r) => {
+      if (!r.kiz) return;
+      const k = r.article || r.name || "Без артикула";
+      if (!map.has(k)) map.set(k, { article: k, name: r.name, codes: [], full: [] });
+      map.get(k).codes.push(kizKey(r.kiz));
+      map.get(k).full.push(r.kiz);
+    });
+    return [...map.values()];
+  }
+  function updCodes(g) {
+    return $("updform").value === "full" ? g.full : g.codes;
+  }
+  async function dlGroup(i, kind) {
+    const g = updGroups()[i];
+    if (!g) return;
+    if (!downloads) return fail("Скачивание недоступно в этом браузере.");
+    const codes = updCodes(g);
+    const safe = g.article.replace(/[\\/:*?"<>|]/g, "_");
+    let data, filename;
+    if (kind === "txt") {
+      data = codes.join("\r\n") + "\r\n";
+      filename = "Коды " + safe + " (" + codes.length + " шт).txt";
+    } else {
+      const ws = XLSX.utils.aoa_to_sheet(codes.map((c) => [c]));
+      ws["!cols"] = [{ wch: 90 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Коды");
+      data = new Blob([XLSX.write(wb, { bookType: "xlsx", type: "array" })]);
+      filename = "Коды " + safe + " (" + codes.length + " шт).xlsx";
+    }
+    try {
+      await downloads.save({ filename, data });
+      note("ok", "Сохранено: " + filename + ". В СБИС откройте строку " + g.article + " → Коды → «загрузить из файла».");
+    } catch (err) {
+      if (err && err.code === "declined") note("warn", "Скачивание отменено.");
+      else fail("Не удалось сохранить файл" + (err && err.message ? ": " + err.message : "."));
+    }
+  }
+  function renderUpd() {
+    const groups = state.demo ? [] : updGroups();
+    $("upd").hidden = !groups.length;
+    $("groups").innerHTML = groups.map((g, i) =>
+      '<div class="group"><div class="gh"><b>' + esc(g.article) + "</b><span>" + g.codes.length + " шт.</span></div>" +
+      '<div class="gn">' + esc(g.name) + "</div>" +
+      '<textarea readonly id="codes-' + i + '" aria-label="Коды ' + esc(g.article) + '">' + esc(updCodes(g).join("\n")) + "</textarea>" +
+      '<div class="gbtns"><button type="button" data-dl="txt" data-g="' + i + '">Файл .txt</button>' +
+      '<button type="button" data-dl="xlsx" data-g="' + i + '">Файл .xlsx</button>' +
+      '<button type="button" data-copy="' + i + '">Копировать</button></div></div>').join("");
+  }
+  $("updform").addEventListener("change", () => renderUpd());
+  $("groups").addEventListener("click", async (e) => {
+    const d = e.target.closest("[data-dl]");
+    if (d) { dlGroup(+d.dataset.g, d.dataset.dl); return; }
+    const b = e.target.closest("[data-copy]");
+    if (!b) return;
+    const ta = $("codes-" + b.dataset.copy);
+    try { await navigator.clipboard.writeText(ta.value); b.textContent = "Скопировано"; }
+    catch (err) { ta.focus(); ta.select(); b.textContent = "Нажмите Ctrl+C"; }
+    setTimeout(() => { b.textContent = "Копировать"; }, 2000);
+  });
+  $("updxlsx").addEventListener("click", async () => {
+    try {
+      const aoa = [["Артикул продавца", "Наименование", "Код маркировки", "№ задания"]];
+      state.rows.filter((r) => r.kiz).sort((a, b) => (a.article || "").localeCompare(b.article || ""))
+        .forEach((r) => aoa.push([r.article, r.name, kizKey(r.kiz), r.order]));
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws["!cols"] = [{ wch: 18 }, { wch: 50 }, { wch: 36 }, { wch: 14 }];
+      const sum = [["Артикул продавца", "Наименование", "Количество"]];
+      updGroups().forEach((g) => sum.push([g.article, g.name, g.codes.length]));
+      const ws2 = XLSX.utils.aoa_to_sheet(sum);
+      ws2["!cols"] = [{ wch: 18 }, { wch: 50 }, { wch: 12 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Коды маркировки");
+      XLSX.utils.book_append_sheet(wb, ws2, "Итого по артикулам");
+      const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      const name = "Коды для УПД " + state.fileName.replace(/\.xlsx?$/i, "") + ".xlsx";
+      if (!downloads) return fail("Скачивание недоступно в этом браузере.");
+      await downloads.save({ filename: name, data: new Blob([out]) });
+      note("ok", "Файл с кодами для УПД сохранён.");
+    } catch (err) {
+      if (err && err.code === "declined") note("warn", "Скачивание отменено.");
+      else fail("Не удалось сохранить файл" + (err && err.message ? ": " + err.message : "."));
+    }
+  });
+
+  $("rows").addEventListener("click", (e) => {
+    const c = e.target.closest("[data-clear]");
+    if (c) { clearKiz(+c.dataset.clear); scan.focus({ preventScroll: true }); return; }
+    const tr = e.target.closest("tr[data-i]");
+    if (tr) select(+tr.dataset.i, false);
+  });
+
+  // ---------- file load ----------
+  $("file").addEventListener("change", async (e) => {
+    picking = false;
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    try {
+      const buf = await f.arrayBuffer();
+      loadBuffer(buf, f.name, null);
+      save(); render();
+      const filled = state.rows.filter((r) => r.kiz).length;
+      note("ok", "Загружено заданий: " + state.rows.length + (filled ? ", из них уже с КИЗ: " + filled : "") + ". Сканируйте первый стикер.");
+    } catch (err) {
+      fail(err.message || "Не удалось прочитать файл.");
+    }
+    e.target.value = "";
+    scan.focus();
+  });
+
+  $("kizmode").addEventListener("change", (e) => { state.kizMode = e.target.value; save(); scan.focus(); });
+  function applyKbd() {
+    const on = $("nokbd").checked;
+    scan.inputMode = on ? "none" : "text";
+    try { localStorage.setItem("kiz-station-nokbd", on ? "1" : "0"); } catch (e) {}
+  }
+  try { $("nokbd").checked = localStorage.getItem("kiz-station-nokbd") === "1"; } catch (e) {}
+  applyKbd();
+  $("nokbd").addEventListener("change", () => { applyKbd(); scan.blur(); setTimeout(() => scan.focus(), 50); });
+  $("undo").addEventListener("click", undo);
+
+  // ---------- export ----------
+  const downloads = {
+    async save({ filename, data }) {
+      const blob = data instanceof Blob ? data : new Blob([data], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename; a.rel = "noopener";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      return { status: "saved" };
+    }
+  };
+  $("export").addEventListener("click", async () => {
+    try {
+      const wb = XLSX.read(b64ToBuf(state.b64), { type: "array" });
+      const ws = wb.Sheets[state.sheetName];
+      state.rows.forEach((r) => {
+        const addr = XLSX.utils.encode_cell({ r: r.r, c: state.cols.kiz });
+        const val = state.kizMode === "short" && r.kiz ? kizKey(r.kiz) : r.kiz;
+        if (val) ws[addr] = { t: "s", v: val };
+        else delete ws[addr];
+      });
+      const range = XLSX.utils.decode_range(ws["!ref"]);
+      range.e.c = Math.max(range.e.c, state.cols.kiz);
+      ws["!ref"] = XLSX.utils.encode_range(range);
+      const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      const name = state.fileName.replace(/\.xlsx?$/i, "") + ".xlsx";
+      if (!downloads) return fail("Скачивание недоступно в этом браузере.");
+      await downloads.save({ filename: name, data: new Blob([out]) });
+      note("ok", "Файл " + name + " сохранён. Его можно загружать в кабинет WB.");
+    } catch (err) {
+      if (err && err.code === "declined") note("warn", "Скачивание отменено.");
+      else fail("Не удалось сохранить файл" + (err && err.message ? ": " + err.message : "."));
+    }
+    scan.focus({ preventScroll: true });
+  });
+
+  // ---------- camera ----------
+  let camOn = false, stream = null, detector = null, zxReader = null, lastVal = "", lastAt = 0, torchOn = false;
+  const video = $("video");
+  function camUpdate() {
+    if (!camOn) return;
+    if (state.selected == null) {
+      $("camstatus").textContent = "Наведите на стикер заказа";
+      $("camsub").textContent = (state.demo ? "Сначала загрузите файл из WB. " : "") + "Готово " + state.rows.filter((r) => r.kiz).length + " из " + state.rows.length;
+    } else {
+      const r = state.rows[state.selected];
+      $("camstatus").textContent = "Теперь Data Matrix: " + (r.article || "товар");
+      $("camsub").textContent = r.name + " · задание " + r.order;
+    }
+    const m = $("msg"), cm = $("cammsg");
+    cm.hidden = m.hidden; cm.className = m.className.replace("msg", "cammsg"); cm.textContent = m.textContent;
+  }
+  function loadScript(src) {
+    return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+  }
+  function onCode(v, fmt) {
+    const now = Date.now();
+    if (v === lastVal && now - lastAt < 3000) return;
+    lastVal = v; lastAt = now;
+    const before = $("msg").textContent + "|" + state.selected;
+    process(v);
+    if (navigator.vibrate) navigator.vibrate($("msg").classList.contains("err") ? [80, 60, 80] : 60);
+    const f = $("camflash"); f.classList.add("on"); setTimeout(() => f.classList.remove("on"), 60);
+    camUpdate();
+  }
+  async function camLoop() {
+    if (!camOn || !detector) return;
+    try {
+      if (video.readyState >= 2) {
+        const found = await detector.detect(video);
+        found.sort((a, b) => (a.format === "code_128" ? 0 : 1) - (b.format === "code_128" ? 0 : 1));
+        for (const b of found) onCode(b.rawValue, b.format);
+      }
+    } catch (e) {}
+    setTimeout(camLoop, 150);
+  }
+  async function openCam() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fail("Этот браузер не даёт доступ к камере. Откройте приложение в Chrome.");
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    } catch (e) {
+      return fail("Нет доступа к камере. Разрешите камеру для этого сайта: значок замка в адресной строке → Разрешения → Камера.");
+    }
+    camOn = true;
+    $("camview").hidden = false;
+    video.srcObject = stream;
+    try { await video.play(); } catch (e) {}
+    const track = stream.getVideoTracks()[0];
+    try {
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      $("torch").hidden = !caps.torch;
+      if (caps.focusMode && caps.focusMode.includes("continuous")) track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
+    } catch (e) {}
+    camUpdate();
+    detector = null;
+    try {
+      if ("BarcodeDetector" in window) {
+        const fm = await BarcodeDetector.getSupportedFormats();
+        if (fm.includes("data_matrix")) detector = new BarcodeDetector({ formats: ["data_matrix", "code_128"].filter((x) => fm.includes(x)) });
+      }
+    } catch (e) { detector = null; }
+    if (detector) return camLoop();
+    try {
+      if (typeof ZXing === "undefined") await loadScript("https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js");
+      const hints = new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.DATA_MATRIX, ZXing.BarcodeFormat.CODE_128]);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      zxReader = new ZXing.BrowserMultiFormatReader(hints, 200);
+      zxReader.decodeFromStream(stream, video, (res) => { if (res && camOn) onCode(res.getText(), ""); });
+    } catch (e) {
+      fail("Не удалось запустить распознавание кодов камерой. Обновите Chrome или используйте сканер.");
+      camUpdate();
+    }
+  }
+  function closeCam() {
+    camOn = false;
+    try { if (zxReader) zxReader.reset(); } catch (e) {}
+    zxReader = null;
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null; torchOn = false;
+    $("camview").hidden = true;
+  }
+  $("cam").addEventListener("click", openCam);
+  $("camclose").addEventListener("click", closeCam);
+  $("torch").addEventListener("click", () => {
+    const t = stream && stream.getVideoTracks()[0];
+    if (!t) return;
+    torchOn = !torchOn;
+    t.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(() => {});
+  });
+  document.addEventListener("visibilitychange", () => { if (document.hidden && camOn) closeCam(); });
+
+  // ---------- offline ----------
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  }
+
+  // ---------- boot ----------
+  if (!restore()) { state.rows = DEMO_ROWS.map((r) => Object.assign({}, r)); }
+  render();
+  if (!TOUCH) scan.focus();
+})();
+</script>
+
+</body>
+</html>
