@@ -1,4 +1,4 @@
-const CACHE = "kiz-scanner-v15";
+const CACHE = "kiz-scanner-v17";
 const SHELL = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png",
   "xlsx.full.min.js"];
 self.addEventListener("install", (e) => {
@@ -12,6 +12,8 @@ self.addEventListener("activate", (e) => {
 // Network first (so updates arrive), cache as fallback for offline use
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
+  // only the app's own files go through the cache; GitHub sync and CDN requests go straight to the network
+  if (new URL(e.request.url).origin !== self.location.origin) return;
   e.respondWith(
     fetch(e.request).then((res) => {
       if (res && (res.ok || res.type === "opaque")) {

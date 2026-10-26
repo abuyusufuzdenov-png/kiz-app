@@ -155,6 +155,13 @@ body[data-mode="fbo"] .fbsonly, body[data-mode="fbs"] .fboonly { display: none !
 .unk .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .unk input { font: inherit; font-size: 14px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); min-width: 0; flex: 1 1 140px; }
 button.danger { background: var(--err); border-color: var(--err); color: var(--panel); }
+.syncbox { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
+.syncbox summary { cursor: pointer; font-weight: 600; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.syncbody { display: grid; gap: 8px; margin-top: 10px; }
+.syncbody .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.syncbody input { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); flex: 1 1 260px; min-width: 0; }
+.chip.ok2 { background: var(--ok-soft); color: var(--ok); }
+.chip.err2 { background: var(--err-soft); color: var(--err); }
 .confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
 footer { color: var(--muted); font-size: 13px; max-width: 70ch; }
 footer p { margin: 4px 0; }
@@ -332,6 +339,20 @@ body { margin: 0; }
     <p>Если подряд идут одинаковые товары, баркод можно сканировать один раз: он остаётся текущим, пока не отсканируете другой баркод или короб.</p>
     <p>Если КИЗ окажется от другого товара (не того, чей баркод отсканирован), приложение пискнет и не запишет его.</p>
   </footer>
+  <details class="syncbox" id="syncbox">
+    <summary>Синхронизация телефона и компьютера <span id="syncstate" class="chip wait">выключена</span></summary>
+    <div class="syncbody">
+      <p class="file">Данные хранятся в вашем секретном гисте на GitHub. На каждом устройстве один раз вставьте один и тот же токен GitHub — дальше всё, что вы сканируете, само появляется на другом устройстве (обновление каждые несколько секунд).</p>
+      <div class="row">
+        <input id="synctoken" type="password" autocomplete="off" placeholder="Токен GitHub (ghp_… или github_pat_…)">
+        <button type="button" id="syncon" class="primary">Подключить</button>
+        <button type="button" id="syncnow">Синхронизировать сейчас</button>
+        <button type="button" id="syncoff">Отключить на этом устройстве</button>
+      </div>
+      <p class="file" id="syncinfo"></p>
+    </div>
+  </details>
+
   <footer class="fbsonly">
     <p>Порядок работы: сканируете стикер заказа, строка подсвечивается жёлтым, затем сканируете КИЗ (Data Matrix «Честного знака»). Код записывается в эту строку, и можно сканировать следующий стикер.</p>
     <p>Если сканер не читает стикер, введите цифры под штрихкодом (хватит последних 4–5) и нажмите Enter. Можно также просто нажать на строку.</p>
@@ -388,7 +409,7 @@ body { margin: 0; }
   let gtinMap = {}, bcMap = {};
   try { gtinMap = JSON.parse(localStorage.getItem(GTIN_STORE) || "{}") || {}; } catch (e) {}
   try { bcMap = JSON.parse(localStorage.getItem(BC_STORE) || "{}") || {}; } catch (e) {}
-  function saveGtin() { try { localStorage.setItem(GTIN_STORE, JSON.stringify(gtinMap)); localStorage.setItem(BC_STORE, JSON.stringify(bcMap)); } catch (e) {} }
+  function saveGtin() { try { localStorage.setItem(GTIN_STORE, JSON.stringify(gtinMap)); localStorage.setItem(BC_STORE, JSON.stringify(bcMap)); } catch (e) {} if (typeof scheduleSync === "function") scheduleSync(); }
   function gtinOf(kiz) { const m = /^01(\d{14})/.exec(normKiz(kiz)); return m ? m[1] : ""; }
   function learnGtin(kiz, article, name) {
     const g = gtinOf(kiz);
@@ -409,9 +430,14 @@ body { margin: 0; }
 
   // ---------- FBO state ----------
   const FBO_STORE = "kiz-fbo-v1";
-  let fbo = { items: [], box: "", expect: "" };
+  let fbo = { items: [], box: "", expect: "", del: {}, epoch: 0 };
   try { const f = JSON.parse(localStorage.getItem(FBO_STORE) || "null"); if (f && Array.isArray(f.items)) fbo = Object.assign(fbo, f); } catch (e) {}
-  function saveFbo() { try { localStorage.setItem(FBO_STORE, JSON.stringify({ items: fbo.items, box: fbo.box, expect: fbo.expect })); } catch (e) {} }
+  fbo.del = fbo.del || {}; fbo.epoch = fbo.epoch || 0;
+  fbo.items.forEach((it) => { if (!it.t) it.t = 1; });
+  function saveFbo() {
+    try { localStorage.setItem(FBO_STORE, JSON.stringify({ items: fbo.items, box: fbo.box, expect: fbo.expect, del: fbo.del, epoch: fbo.epoch })); } catch (e) {}
+    scheduleSync();
+  }
   function eanValid(d) {
     if (!/^\d{13}$/.test(d)) return false;
     let sum = 0;
@@ -473,7 +499,7 @@ body { margin: 0; }
     const dupS = state.rows.find((r) => r.kiz && kizKey(r.kiz) === key);
     if (dupS) return fail("Этот КИЗ уже привязан к FBS-заданию " + rowLabel(dupS) + ".");
     if (!fbo.box) return fail("Сначала отсканируйте QR-код короба, потом баркод и КИЗ товаров.");
-    const item = { kiz: v, box: fbo.box, gtin };
+    const item = { kiz: v, box: fbo.box, gtin, t: Date.now() };
     if (!fbo.expect && !wbBarcode(gtin)) return fail("Сначала отсканируйте баркод товара (с этикетки WB), потом КИЗ.");
     if (fbo.expect) {
       const want = fbo.expect;
@@ -501,6 +527,7 @@ body { margin: 0; }
   function fboUndo() {
     const it = fbo.items.pop();
     if (!it) return;
+    fbo.del[kizKey(it.kiz)] = Date.now();
     saveFbo(); render();
     note("warn", "Отменено: последний КИЗ удалён (" + boxLabel(it.box) + ").");
   }
@@ -553,6 +580,7 @@ body { margin: 0; }
     const b = e.target.closest("[data-fdel]");
     if (!b) return;
     const it = fbo.items.splice(+b.dataset.fdel, 1)[0];
+    if (it) fbo.del[kizKey(it.kiz)] = Date.now();
     saveFbo(); render();
     if (it) note("warn", "КИЗ удалён (" + boxLabel(it.box) + ").");
   });
@@ -572,7 +600,7 @@ body { margin: 0; }
   $("fbonew").addEventListener("click", () => { $("fbonewconfirm").hidden = false; });
   $("fbonewno").addEventListener("click", () => { $("fbonewconfirm").hidden = true; });
   $("fbonewyes").addEventListener("click", () => {
-    fbo = { items: [], box: "", expect: "" };
+    fbo = { items: [], box: "", expect: "", del: {}, epoch: Date.now() };
     saveFbo(); $("fbonewconfirm").hidden = true; render();
     note("ok", "Начата новая поставка. Сканируйте QR-код первого короба.");
   });
@@ -640,14 +668,17 @@ body { margin: 0; }
     fboSave("Баркод-КИЗ " + stamp() + ".xlsx", aoa, "Баркод-КИЗ", [16, 90, 18, 40, 36, 18]);
   });
 
+  function hashStr(t) { let h = 5381; for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return (h >>> 0).toString(36) + t.length; }
+
   // ---------- storage ----------
   function save() {
     if (state.demo) return;
     try {
       const kiz = {};
       state.rows.forEach((row) => { if (row.kiz) kiz[row.r] = row.kiz; });
-      localStorage.setItem(STORE, JSON.stringify({ fileName: state.fileName, b64: state.b64, kiz, kizMode: state.kizMode }));
+      localStorage.setItem(STORE, JSON.stringify({ fileName: state.fileName, b64: state.b64, kiz, kizMode: state.kizMode, kizT: state.kizT, fileT: state.fileT, fileId: state.fileId }));
     } catch (e) {}
+    scheduleSync();
   }
   function restore() {
     try {
@@ -656,6 +687,9 @@ body { margin: 0; }
       const s = JSON.parse(raw);
       if (!s.b64) return false;
       loadBuffer(b64ToBuf(s.b64), s.fileName, s.kiz || {});
+      state.kizT = s.kizT || {};
+      state.fileT = s.fileT || 0;
+      if (s.fileId) state.fileId = s.fileId;
       if (s.kizMode) { state.kizMode = s.kizMode; $("kizmode").value = s.kizMode; }
       return true;
     } catch (e) { return false; }
@@ -716,8 +750,9 @@ body { margin: 0; }
     if (!rows.length) throw new Error("В файле нет строк со стикерами.");
     rows.forEach((r) => { if (r.kiz) learnGtin(r.kiz, r.article, r.name); });
     state = Object.assign(state, {
-      demo: false, fileName, b64: bufToB64(buf), sheetName: found.name, cols, rows, selected: null, history: []
+      demo: false, fileName, b64: bufToB64(buf), sheetName: found.name, cols, rows, selected: null, history: [], kizT: {}
     });
+    state.fileId = fileName + ":" + hashStr(state.b64);
   }
 
   // ---------- scanner input: layout-independent ----------
@@ -937,6 +972,7 @@ body { margin: 0; }
     if (dup) return fail("Этот КИЗ уже привязан к заданию " + rowLabel(dup) + ". Отсканируйте другой код.");
     const value = state.kizMode === "short" ? key : v;
     state.history.push({ i: state.selected, prev: row.kiz });
+    state.kizT[row.r] = Date.now();
     const replaced = !!row.kiz;
     row.kiz = value;
     learnGtin(v, row.article, row.name);
@@ -956,6 +992,7 @@ body { margin: 0; }
     if (!row.kiz) return;
     state.history.push({ i, prev: row.kiz });
     row.kiz = "";
+    state.kizT[row.r] = Date.now();
     save(); render();
     note("warn", "КИЗ удалён у задания " + rowLabel(row) + ".");
   }
@@ -964,6 +1001,7 @@ body { margin: 0; }
     const h = state.history.pop();
     if (!h) return;
     state.rows[h.i].kiz = h.prev;
+    state.kizT[state.rows[h.i].r] = Date.now();
     state.selected = null;
     save(); render();
     note("warn", "Отменено: " + rowLabel(state.rows[h.i]) + (h.prev ? ", вернулся прежний КИЗ." : ", КИЗ снова пустой."));
@@ -1058,9 +1096,10 @@ body { margin: 0; }
   }
   function defaultNum() { const d = new Date(); return "К-" + String(d.getDate()).padStart(2, "0") + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getHours()).padStart(2, "0") + String(d.getMinutes()).padStart(2, "0"); }
   function saveReq() {
-    const r = { namesMap: updNames };
+    const r = { namesMap: updNames, t: Date.now() };
     RQ.forEach((k) => { if (k !== "date") r[k] = $("rq_" + k).value.trim(); });
     try { localStorage.setItem(REQ_STORE, JSON.stringify(r)); } catch (e) {}
+    scheduleSync();
   }
   function showReqInfo() {
     const n = Object.keys(updNames).length;
@@ -1335,6 +1374,8 @@ body { margin: 0; }
     try {
       const buf = await f.arrayBuffer();
       loadBuffer(buf, f.name, null);
+      state.fileT = Date.now();
+      state.rows.forEach((r) => { if (r.kiz) state.kizT[r.r] = state.fileT; });
       save(); render();
       const filled = state.rows.filter((r) => r.kiz).length;
       note("ok", "Загружено заданий: " + state.rows.length + (filled ? ", из них уже с КИЗ: " + filled : "") + ". Сканируйте первый стикер.");
@@ -1409,6 +1450,153 @@ body { margin: 0; }
       fail("Не удалось отправить файл" + (err && err.message ? ": " + err.message : "."));
     }
   });
+
+  // ---------- sync via a secret GitHub gist (standalone app only) ----------
+  const SYNC_STORE = "kiz-sync-v1", GIST_DESC = "kiz-scanner-sync", GIST_FILE = "kiz-sync.json";
+  let syncCfg = { token: "", gist: "" };
+  try { syncCfg = Object.assign(syncCfg, JSON.parse(localStorage.getItem(SYNC_STORE) || "{}")); } catch (e) {}
+  const SYNC_OK = !window.claude;
+  let syncTimer = null, syncBusy = false, syncAgain = false, applyingRemote = false, lastSyncAt = 0, lastRemote = "";
+  function saveSyncCfg() { try { localStorage.setItem(SYNC_STORE, JSON.stringify(syncCfg)); } catch (e) {} }
+  function syncStatus(kind, text) {
+    const c = $("syncstate"); if (!c) return;
+    c.className = "chip " + (kind === "ok" ? "ok2" : kind === "err" ? "err2" : "wait");
+    c.textContent = text;
+  }
+  function scheduleSync() {
+    if (!SYNC_OK || !syncCfg.token || applyingRemote) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(syncNow, 1500);
+  }
+  async function gh(path, opts) {
+    const res = await fetch("https://api.github.com" + path, Object.assign({}, opts, {
+      headers: Object.assign({ Authorization: "Bearer " + syncCfg.token, Accept: "application/vnd.github+json" }, (opts && opts.headers) || {})
+    }));
+    if (res.status === 401) throw new Error("GitHub не принял токен. Проверьте, что он скопирован целиком и у него есть доступ к гистам (Gists).");
+    if (res.status === 403 || res.status === 404) throw new Error("Нет доступа к гистам: у токена должно быть право «Gists: Read and write» (или галочка gist).");
+    if (!res.ok) throw new Error("GitHub ответил " + res.status + ".");
+    return res.json();
+  }
+  function localDoc() {
+    const req = (() => { try { return JSON.parse(localStorage.getItem(REQ_STORE) || "{}"); } catch (e) { return {}; } })();
+    const kiz = {};
+    if (!state.demo) state.rows.forEach((r) => { if (r.kiz || state.kizT[r.r]) kiz[r.r] = { v: r.kiz || "", t: state.kizT[r.r] || 1 }; });
+    return {
+      v: 1,
+      fbs: state.demo ? null : { fileId: state.fileId, fileT: state.fileT || 1, fileName: state.fileName, b64: state.b64, kiz },
+      fbo: { epoch: fbo.epoch, del: fbo.del, items: fbo.items.map((it) => ({ kiz: it.kiz, box: it.box, gtin: it.gtin, barcode: it.barcode || "", t: it.t || 1 })) },
+      gtin: gtinMap, bc: bcMap, req
+    };
+  }
+  function mergeRemote(R) {
+    if (!R || R.v !== 1) return;
+    applyingRemote = true;
+    try {
+      // FBS
+      if (R.fbs && R.fbs.b64) {
+        const sameFile = !state.demo && R.fbs.fileId === state.fileId;
+        if (!sameFile && (state.demo || (R.fbs.fileT || 0) > (state.fileT || 0))) {
+          const kizOv = {}, kizT = {};
+          Object.keys(R.fbs.kiz || {}).forEach((r) => { kizOv[r] = R.fbs.kiz[r].v; kizT[r] = R.fbs.kiz[r].t; });
+          loadBuffer(b64ToBuf(R.fbs.b64), R.fbs.fileName, kizOv);
+          state.kizT = kizT; state.fileT = R.fbs.fileT; state.fileId = R.fbs.fileId;
+        } else if (sameFile) {
+          Object.keys(R.fbs.kiz || {}).forEach((r) => {
+            const e = R.fbs.kiz[r], row = state.rows.find((x) => String(x.r) === String(r));
+            if (row && (e.t || 0) > (state.kizT[row.r] || 0)) { row.kiz = normKiz(e.v); state.kizT[row.r] = e.t; if (row.kiz) learnGtin(row.kiz, row.article, row.name); }
+          });
+        }
+      }
+      // FBO
+      if (R.fbo) {
+        if ((R.fbo.epoch || 0) > fbo.epoch) { fbo.epoch = R.fbo.epoch; fbo.items = fbo.items.filter((it) => (it.t || 0) >= fbo.epoch); fbo.del = {}; }
+        Object.keys(R.fbo.del || {}).forEach((k) => { if ((R.fbo.del[k] || 0) > (fbo.del[k] || 0)) fbo.del[k] = R.fbo.del[k]; });
+        const have = new Set(fbo.items.map((it) => kizKey(it.kiz)));
+        (R.fbo.items || []).forEach((it) => {
+          const k = kizKey(it.kiz);
+          if (!have.has(k) && (it.t || 0) >= fbo.epoch) { fbo.items.push(Object.assign({}, it)); have.add(k); }
+        });
+        fbo.items = fbo.items.filter((it) => !((fbo.del[kizKey(it.kiz)] || 0) >= (it.t || 0)) && (it.t || 0) >= fbo.epoch);
+        fbo.items.sort((a, b) => (a.t || 0) - (b.t || 0));
+      }
+      // directories: keep local entries, take what is missing
+      Object.keys(R.gtin || {}).forEach((g) => { gtinMap[g] = Object.assign({}, R.gtin[g], gtinMap[g] || {}); });
+      Object.keys(R.bc || {}).forEach((b) => { if (!bcMap[b]) bcMap[b] = R.bc[b]; });
+      // requisites: newer wins
+      let lr = {};
+      try { lr = JSON.parse(localStorage.getItem(REQ_STORE) || "{}"); } catch (e) {}
+      if (R.req && (R.req.t || 0) > (lr.t || 0)) { try { localStorage.setItem(REQ_STORE, JSON.stringify(R.req)); } catch (e) {} loadReq(); }
+      save(); saveFbo(); saveGtin();
+    } finally { applyingRemote = false; }
+  }
+  async function findOrCreateGist() {
+    if (syncCfg.gist) return syncCfg.gist;
+    for (let page = 1; page <= 5; page++) {
+      const list = await gh("/gists?per_page=100&page=" + page);
+      const g = list.find((x) => x.description === GIST_DESC && x.files && x.files[GIST_FILE]);
+      if (g) { syncCfg.gist = g.id; saveSyncCfg(); return g.id; }
+      if (list.length < 100) break;
+    }
+    const created = await gh("/gists", { method: "POST", body: JSON.stringify({ description: GIST_DESC, public: false, files: { [GIST_FILE]: { content: JSON.stringify(localDoc()) } } }) });
+    syncCfg.gist = created.id; saveSyncCfg();
+    return created.id;
+  }
+  async function readGist(id) {
+    const g = await gh("/gists/" + id + "?t=" + Date.now(), { cache: "no-store" });
+    const f = g.files && g.files[GIST_FILE];
+    if (!f) return null;
+    let text = f.content;
+    if (f.truncated && f.raw_url) text = await (await fetch(f.raw_url, { cache: "no-store" })).text();
+    try { return JSON.parse(text); } catch (e) { return null; }
+  }
+  async function syncNow() {
+    if (!SYNC_OK || !syncCfg.token) return;
+    if (syncBusy) { syncAgain = true; return; }
+    syncBusy = true;
+    try {
+      syncStatus("wait", "синхронизация…");
+      const id = await findOrCreateGist();
+      const R = await readGist(id);
+      const remoteText = R ? JSON.stringify(R) : "";
+      if (R && remoteText !== lastRemote) { mergeRemote(R); render(); }
+      lastRemote = remoteText;
+      const mine = JSON.stringify(localDoc());
+      if (mine !== remoteText) {
+        await gh("/gists/" + id, { method: "PATCH", body: JSON.stringify({ files: { [GIST_FILE]: { content: mine } } }) });
+        lastRemote = mine;
+      }
+      lastSyncAt = Date.now();
+      const t = new Date(lastSyncAt);
+      syncStatus("ok", "синхронизировано " + String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0") + ":" + String(t.getSeconds()).padStart(2, "0"));
+      $("syncinfo").textContent = "";
+    } catch (err) {
+      syncStatus("err", navigator.onLine === false ? "нет интернета" : "ошибка");
+      $("syncinfo").textContent = err.message || String(err);
+    } finally {
+      syncBusy = false;
+      if (syncAgain) { syncAgain = false; scheduleSync(); }
+    }
+  }
+  function initSync() {
+    if (!SYNC_OK) { $("syncbox").hidden = true; return; }
+    if (syncCfg.token) { $("synctoken").value = "••••••••"; syncStatus("wait", "подключена"); syncNow(); }
+    setInterval(() => { if (syncCfg.token && !document.hidden) syncNow(); }, 8000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden && syncCfg.token) syncNow(); });
+    $("syncon").addEventListener("click", () => {
+      const t = $("synctoken").value.trim();
+      if (!t || t.startsWith("•")) return fail("Вставьте токен GitHub в поле.");
+      syncCfg = { token: t, gist: "" }; saveSyncCfg();
+      $("synctoken").value = "••••••••";
+      note("ok", "Синхронизация подключена. Сделайте то же на другом устройстве с этим же токеном.");
+      syncNow();
+    });
+    $("syncnow").addEventListener("click", () => { if (!syncCfg.token) return fail("Сначала подключите синхронизацию токеном."); syncNow(); });
+    $("syncoff").addEventListener("click", () => {
+      syncCfg = { token: "", gist: "" }; saveSyncCfg();
+      $("synctoken").value = ""; syncStatus("wait", "выключена"); $("syncinfo").textContent = "";
+      note("warn", "Синхронизация на этом устройстве отключена. Данные на устройстве остались.");
+    });
+  }
 
   // ---------- camera ----------
   let camOn = false, stream = null, detector = null, zxReader = null, lastVal = "", lastAt = 0, torchOn = false;
@@ -1511,6 +1699,7 @@ body { margin: 0; }
   loadReq();
   if (!restore()) { state.rows = DEMO_ROWS.map((r) => Object.assign({}, r)); }
   render();
+  initSync();
   if (!TOUCH) scan.focus();
 })();
 </script>
