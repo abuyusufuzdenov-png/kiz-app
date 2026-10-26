@@ -781,7 +781,7 @@ body { margin: 0; }
     }
     // GS separator from scanners comes as Ctrl+] or as a raw GS char
     if ((e.ctrlKey && (e.code === "BracketRight" || e.key === "]" || e.key === "ъ")) || e.key === GS || e.keyCode === 29) {
-      e.preventDefault(); insert(GS); evbuf.push({ gs: true }); return;
+      e.preventDefault(); insert(GS); evbuf.push({ gs: true }); kick(); return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "Backspace" || e.key === "Delete") { pasted = true; return; }
@@ -790,22 +790,24 @@ body { margin: 0; }
       // keep the field Latin-only: a Cyrillic char is replaced right away by the Latin key on the same physical button
       if (/[^\x00-\x7f]/.test(e.key)) {
         const ch = charFromCode(e) ?? RU2EN[e.key];
-        if (ch != null) { e.preventDefault(); insert(ch); }
+        if (ch != null) { e.preventDefault(); insert(ch); kick(); }
       }
     }
   });
   // Scanners that don't send Enter: if characters arrived at scanner speed, submit after a short pause
   let lastKey = 0, fastCount = 0, autoTimer = null, sawEnter = false;
-  scan.addEventListener("input", () => {
+  // called for every character, also for ones the page inserts itself (Latin replacement), so auto-submit keeps working
+  function kick() {
     const now = performance.now();
     if (now - lastKey < 60) fastCount++; else fastCount = 0;
     lastKey = now;
     clearTimeout(autoTimer);
     autoTimer = setTimeout(() => {
-      if (!sawEnter && fastCount >= 5 && scan.value.trim().length >= 6) { const v = resolved(); scan.value = ""; resetBuf(); process(v); }
+      if (fastCount >= 5 && scan.value.trim().length >= 6) { const v = resolved(); scan.value = ""; resetBuf(); process(v); }
       fastCount = 0;
-    }, 700);
-  });
+    }, 400);
+  }
+  scan.addEventListener("input", kick);
   const TOUCH = matchMedia("(pointer: coarse)").matches;
   function checkFocus() {
     if (TOUCH) { $("focushint").hidden = true; scan.classList.remove("idle"); return; }
