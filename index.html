@@ -329,8 +329,8 @@ body { margin: 0; }
 
   <footer class="fboonly">
     <p>Порядок работы: сканируете ШК короба (наклейка WB на коробе), затем КИЗ всех товаров в этом коробе. Для следующего короба сканируете его ШК и продолжаете.</p>
-    <p>Баркод товара приложение берёт из самого КИЗ (GTIN), отдельно сканировать его не нужно. Если отсканировать баркод товара перед КИЗ, приложение проверит, что КИЗ от этого товара.</p>
-    <p>Артикулы подтягиваются из ваших FBS-сборок или из выгрузки карточек WB (кнопка «Загрузить карточки WB»).</p>
+    <p>Баркод WB (например 2058557408143) может не совпадать с GTIN в КИЗ. Для каждого товара один раз отсканируйте баркод с этикетки, затем его КИЗ: приложение запомнит пару и дальше будет подставлять баркод само. Если сканировать баркод перед каждым КИЗ, приложение ещё и проверит, что КИЗ от этого товара.</p>
+    <p>Артикулы подтягиваются из ваших FBS-сборок, а баркоды и артикулы разом — из выгрузки карточек WB (кнопка «Загрузить карточки WB»).</p>
   </footer>
   <footer class="fbsonly">
     <p>Порядок работы: сканируете стикер заказа, строка подсвечивается жёлтым, затем сканируете КИЗ (Data Matrix «Честного знака»). Код записывается в эту строку, и можно сканировать следующий стикер.</p>
@@ -381,19 +381,31 @@ body { margin: 0; }
   }
   document.querySelectorAll(".modes [data-mode]").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
 
-  // ---------- GTIN → article map (learned from FBS files and WB card exports) ----------
-  const GTIN_STORE = "kiz-gtin-v1";
-  let gtinMap = {};
+  // ---------- product directory ----------
+  // gtinMap: GTIN from KIZ → { article, name, barcode }   (WB barcode can differ from GTIN!)
+  // bcMap:   WB barcode   → { article, name }            (from WB card export or learned by scanning)
+  const GTIN_STORE = "kiz-gtin-v1", BC_STORE = "kiz-bc-v1";
+  let gtinMap = {}, bcMap = {};
   try { gtinMap = JSON.parse(localStorage.getItem(GTIN_STORE) || "{}") || {}; } catch (e) {}
-  function saveGtin() { try { localStorage.setItem(GTIN_STORE, JSON.stringify(gtinMap)); } catch (e) {} }
+  try { bcMap = JSON.parse(localStorage.getItem(BC_STORE) || "{}") || {}; } catch (e) {}
+  function saveGtin() { try { localStorage.setItem(GTIN_STORE, JSON.stringify(gtinMap)); localStorage.setItem(BC_STORE, JSON.stringify(bcMap)); } catch (e) {} }
   function gtinOf(kiz) { const m = /^01(\d{14})/.exec(normKiz(kiz)); return m ? m[1] : ""; }
-  function barcodeOf(gtin) { return gtin && gtin[0] === "0" ? gtin.slice(1) : gtin; }
   function learnGtin(kiz, article, name) {
     const g = gtinOf(kiz);
     if (!g || !article) return;
-    const cur = gtinMap[g];
-    if (!cur || cur.article !== article || (!cur.name && name)) { gtinMap[g] = { article, name: name || (cur && cur.name) || "" }; saveGtin(); }
+    const cur = gtinMap[g] || {};
+    if (cur.article !== article || (!cur.name && name)) { gtinMap[g] = Object.assign({}, cur, { article, name: name || cur.name || "" }); saveGtin(); }
   }
+  function barcodesOfArticle(a) { return a ? Object.keys(bcMap).filter((b) => bcMap[b].article === a) : []; }
+  function wbBarcode(gtin) {
+    const g = gtinMap[gtin] || {};
+    if (g.barcode) return g.barcode;
+    const list = barcodesOfArticle(g.article);
+    return list.length === 1 ? list[0] : "";
+  }
+  function itemBarcode(it) { return it.barcode || wbBarcode(it.gtin); }
+  function itemArticle(it) { const g = gtinMap[it.gtin] || {}; return g.article || ((bcMap[itemBarcode(it)] || {}).article) || ""; }
+  function itemName(it) { const g = gtinMap[it.gtin] || {}; return g.name || ((bcMap[itemBarcode(it)] || {}).name) || ""; }
 
   // ---------- FBO state ----------
   const FBO_STORE = "kiz-fbo-v1";
@@ -406,13 +418,18 @@ body { margin: 0; }
     for (let i = 0; i < 12; i++) sum += (+d[i]) * (i % 2 ? 3 : 1);
     return (10 - sum % 10) % 10 === +d[12];
   }
+  function articleOfBarcode(b) {
+    if (bcMap[b]) return bcMap[b].article;
+    const g = Object.keys(gtinMap).find((k) => gtinMap[k].barcode === b);
+    return g ? gtinMap[g].article : "";
+  }
   function processFbo(v) {
     if (isKiz(v)) return addFboKiz(v);
     const digits = v.replace(/\s/g, "");
-    if (eanValid(digits)) {
+    if (eanValid(digits) || (/^\d{8,14}$/.test(digits) && bcMap[digits])) {
       fbo.expect = digits;
-      const info = gtinMap[digits.padStart(14, "0")];
-      note("ok", "Баркод товара " + digits + (info ? " (" + info.article + ")" : "") + ". Теперь сканируйте КИЗ этого товара.");
+      const a = articleOfBarcode(digits);
+      note("ok", "Баркод товара " + digits + (a ? " (" + a + ")" : "") + ". Теперь сканируйте КИЗ этого товара.");
       beep(true); render(); return;
     }
     fbo.box = v.trim();
@@ -431,17 +448,29 @@ body { margin: 0; }
     if (dupF) return fail("Этот КИЗ уже отсканирован в короб " + dupF.box + ".");
     const dupS = state.rows.find((r) => r.kiz && kizKey(r.kiz) === key);
     if (dupS) return fail("Этот КИЗ уже привязан к FBS-заданию " + rowLabel(dupS) + ".");
-    if (fbo.expect && fbo.expect.padStart(14, "0") !== gtin) {
-      const want = fbo.expect; fbo.expect = "";
-      render();
-      return fail("КИЗ от другого товара: баркод товара " + want + ", а в КИЗ " + barcodeOf(gtin) + ". Проверьте этикетку.");
+    const item = { kiz: v, box: fbo.box, gtin };
+    if (fbo.expect) {
+      const want = fbo.expect;
+      fbo.expect = "";
+      const g = gtinMap[gtin] || {};
+      const artWant = articleOfBarcode(want);
+      const known = g.barcode && g.barcode !== want;
+      const otherArticle = g.article && artWant && g.article !== artWant;
+      const ownerG = Object.keys(gtinMap).find((k) => k !== gtin && gtinMap[k].barcode === want);
+      const takenByOther = ownerG && !(g.article && gtinMap[ownerG].article === g.article);
+      if (otherArticle || takenByOther || (known && !(artWant && artWant === g.article))) {
+        render();
+        return fail("КИЗ от другого товара: баркод " + want + (artWant ? " (" + artWant + ")" : "") + ", а этот КИЗ относится к " + (g.article || "баркоду " + g.barcode) + ". Проверьте этикетку.");
+      }
+      if (!g.barcode) { gtinMap[gtin] = Object.assign({}, g, { barcode: want, article: g.article || artWant || "" }); saveGtin(); }
+      item.barcode = want;
     }
-    fbo.expect = "";
-    fbo.items.push({ kiz: v, box: fbo.box, gtin });
+    fbo.items.push(item);
     saveFbo(); render();
-    const info = gtinMap[gtin];
     const inBox = fbo.items.filter((it) => it.box === fbo.box).length;
-    note("ok", "КИЗ записан: " + (info ? info.article : "баркод " + barcodeOf(gtin)) + " → короб " + fbo.box + " (в коробе " + inBox + " шт., всего " + fbo.items.length + ")." + (info ? "" : " Укажите артикул для этого баркода ниже."));
+    const bc = itemBarcode(item), art = itemArticle(item);
+    note(bc ? "ok" : "warn", "КИЗ записан: " + (art || "GTIN " + gtin) + (bc ? ", баркод " + bc : "") + " → короб " + fbo.box + " (в коробе " + inBox + " шт., всего " + fbo.items.length + ")." +
+      (bc ? "" : " Баркод WB для этого товара пока неизвестен: отсканируйте баркод с этикетки товара, потом его КИЗ — приложение запомнит."));
     beep(true);
   }
   function fboUndo() {
@@ -450,12 +479,12 @@ body { margin: 0; }
     saveFbo(); render();
     note("warn", "Отменено: последний КИЗ удалён из короба " + it.box + ".");
   }
-  function fboArticle(gtin) { const i = gtinMap[gtin]; return i ? i.article : ""; }
   function fboSummary() {
     const map = new Map();
     fbo.items.forEach((it) => {
-      const k = it.box + "|" + it.gtin;
-      if (!map.has(k)) map.set(k, { box: it.box, gtin: it.gtin, n: 0 });
+      const bc = itemBarcode(it);
+      const k = it.box + "|" + (bc || "?" + it.gtin);
+      if (!map.has(k)) map.set(k, { box: it.box, barcode: bc, gtin: it.gtin, article: itemArticle(it), name: itemName(it), n: 0 });
       map.get(k).n++;
     });
     return [...map.values()];
@@ -475,17 +504,17 @@ body { margin: 0; }
       step.className = "step kiz";
       step.innerHTML = '<div class="badge">2</div><div class="title">Сканируйте КИЗ товаров</div><div class="sub">Короб <b class="mono">' + esc(fbo.box) + "</b> · в нём " + fbo.items.filter((it) => it.box === fbo.box).length + " шт. Для другого короба отсканируйте его ШК." + (fbo.expect ? " Ждём КИЗ товара с баркодом <b class=\"mono\">" + esc(fbo.expect) + "</b>." : "") + "</div>";
     }
-    $("fbosum").innerHTML = fboSummary().map((r) => {
-      const info = gtinMap[r.gtin] || {};
-      return '<tr class="' + (r.box === fbo.box ? "curbox" : "") + '"><td class="num">' + esc(r.box) + '</td><td class="num">' + esc(barcodeOf(r.gtin)) + "</td><td>" + esc(info.article || "—") + '</td><td class="name">' + esc(info.name || "") + '</td><td class="num">' + r.n + "</td></tr>";
-    }).join("") || '<tr><td colspan="5" class="file">Пока пусто</td></tr>';
+    $("fbosum").innerHTML = fboSummary().map((r) =>
+      '<tr class="' + (r.box === fbo.box ? "curbox" : "") + '"><td class="num">' + esc(r.box) + '</td><td class="num">' + (r.barcode ? esc(r.barcode) : '<span class="chip wait">неизвестен</span>') + "</td><td>" + esc(r.article || "—") + '</td><td class="name">' + esc(r.name) + '</td><td class="num">' + r.n + "</td></tr>"
+    ).join("") || '<tr><td colspan="5" class="file">Пока пусто</td></tr>';
     $("fbocount").textContent = fbo.items.length;
     $("fboitems").innerHTML = fbo.items.map((it, i) =>
-      '<tr><td class="num">' + esc(it.box) + "</td><td>" + esc(fboArticle(it.gtin) || barcodeOf(it.gtin)) + '</td><td class="kizcell">' + kizHtml(it.kiz) + '</td><td><button class="x" type="button" data-fdel="' + i + '" aria-label="Удалить КИЗ">×</button></td></tr>').reverse().join("");
-    const unknown = [...new Set(fbo.items.map((it) => it.gtin))].filter((g) => !gtinMap[g]);
-    $("fbounknown").innerHTML = unknown.length ? '<div class="unk"><b>Укажите артикул для баркодов, которых приложение ещё не знает</b>' + unknown.map((g) =>
-      '<div class="row"><span class="mono">' + esc(barcodeOf(g)) + '</span><input data-ug="' + g + '" data-uf="article" placeholder="Артикул продавца, например tt101sardinia"><input data-ug="' + g + '" data-uf="name" placeholder="Наименование (необязательно)"><button type="button" data-usave="' + g + '">Сохранить</button></div>').join("") +
-      '<div class="file">Или загрузите выгрузку карточек WB, или сначала соберите FBS-заказ с этим товаром — приложение запомнит артикул.</div></div>' : "";
+      '<tr><td class="num">' + esc(it.box) + "</td><td>" + esc(itemArticle(it) || "GTIN " + it.gtin) + '</td><td class="num">' + esc(itemBarcode(it) || "—") + '</td><td class="kizcell">' + kizHtml(it.kiz) + '</td><td><button class="x" type="button" data-fdel="' + i + '" aria-label="Удалить КИЗ">×</button></td></tr>').reverse().join("");
+    const need = [...new Set(fbo.items.filter((it) => !itemBarcode(it) || !itemArticle(it)).map((it) => it.gtin))];
+    $("fbounknown").innerHTML = need.length ? '<div class="unk"><b>Для этих товаров не хватает баркода WB или артикула</b>' +
+      '<div class="file">Проще всего: отсканируйте баркод с этикетки товара (как 2058557408143), затем его КИЗ — приложение запомнит пару. Или впишите вручную:</div>' +
+      need.map((g) => { const i = gtinMap[g] || {}; return '<div class="row"><span class="mono">GTIN ' + esc(g) + '</span><input data-ug="' + g + '" data-uf="barcode" inputmode="numeric" placeholder="Баркод WB с этикетки" value="' + esc(wbBarcode(g)) + '"><input data-ug="' + g + '" data-uf="article" placeholder="Артикул продавца" value="' + esc(i.article || "") + '"><button type="button" data-usave="' + g + '">Сохранить</button></div>'; }).join("") +
+      '<div class="file">Ещё вариант: загрузите выгрузку карточек WB (кнопка «Загрузить карточки WB») — там есть баркоды всех артикулов.</div></div>' : "";
     renderUpd();
   }
   $("fboitems").addEventListener("click", (e) => {
@@ -499,12 +528,14 @@ body { margin: 0; }
     const b = e.target.closest("[data-usave]");
     if (!b) return;
     const g = b.dataset.usave;
-    const art = (document.querySelector('[data-ug="' + g + '"][data-uf="article"]') || {}).value || "";
-    const nm = (document.querySelector('[data-ug="' + g + '"][data-uf="name"]') || {}).value || "";
-    if (!art.trim()) return fail("Введите артикул продавца.");
-    gtinMap[g] = { article: art.trim(), name: nm.trim() };
+    const val = (f) => ((document.querySelector('[data-ug="' + g + '"][data-uf="' + f + '"]') || {}).value || "").trim();
+    const bc = val("barcode").replace(/\D/g, ""), art = val("article");
+    if (!bc && !art) return fail("Впишите баркод WB и/или артикул.");
+    const cur = gtinMap[g] || {};
+    gtinMap[g] = Object.assign({}, cur, bc ? { barcode: bc } : {}, art ? { article: art } : {});
+    if (bc && art) bcMap[bc] = Object.assign({}, bcMap[bc] || {}, { article: art });
     saveGtin(); render();
-    note("ok", "Запомнил: баркод " + barcodeOf(g) + " — " + art.trim() + ".");
+    note("ok", "Запомнил: " + [art, bc && "баркод " + bc].filter(Boolean).join(", ") + ".");
   });
   $("fbonew").addEventListener("click", () => { $("fbonewconfirm").hidden = false; });
   $("fbonewno").addEventListener("click", () => { $("fbonewconfirm").hidden = true; });
@@ -533,7 +564,7 @@ body { margin: 0; }
             const art = row[ac] != null ? String(row[ac]).trim() : "";
             if (!art) continue;
             String(row[bc] || "").split(/[;,\s]+/).filter((x) => /^\d{8,14}$/.test(x)).forEach((b) => {
-              gtinMap[b.padStart(14, "0")] = { article: art, name: nc >= 0 && row[nc] ? String(row[nc]).trim() : "" };
+              bcMap[b] = { article: art, name: nc >= 0 && row[nc] ? String(row[nc]).trim() : "" };
               added++;
             });
           }
@@ -563,13 +594,16 @@ body { margin: 0; }
   }
   function stamp() { const d = new Date(); return String(d.getDate()).padStart(2, "0") + "." + String(d.getMonth() + 1).padStart(2, "0") + "." + d.getFullYear(); }
   $("fbobox").addEventListener("click", () => {
+    const rows = fboSummary();
+    const miss = rows.filter((r) => !r.barcode);
+    if (miss.length) return fail("Не для всех товаров известен баркод WB (" + miss.length + " поз.). Заполните их в жёлтом блоке выше или отсканируйте баркод с этикетки, затем КИЗ.");
     const aoa = [["Баркод товара", "Кол-во товаров", "ШК короба"]];
-    fboSummary().forEach((r) => aoa.push([barcodeOf(r.gtin), r.n, r.box]));
+    rows.forEach((r) => aoa.push([r.barcode, r.n, r.box]));
     fboSave("Короба FBO " + stamp() + ".xlsx", aoa, "Короба", [18, 16, 22]);
   });
   $("fbolist").addEventListener("click", () => {
     const aoa = [["ШК короба", "Баркод товара", "Артикул продавца", "Наименование", "КИЗ (31 символ)", "КИЗ полный"]];
-    fbo.items.forEach((it) => { const i = gtinMap[it.gtin] || {}; aoa.push([it.box, barcodeOf(it.gtin), i.article || "", i.name || "", kizKey(it.kiz), normKiz(it.kiz)]); });
+    fbo.items.forEach((it) => aoa.push([it.box, itemBarcode(it), itemArticle(it), itemName(it), kizKey(it.kiz), normKiz(it.kiz)]));
     fboSave("КИЗ поставки FBO " + stamp() + ".xlsx", aoa, "КИЗ", [22, 16, 18, 40, 36, 90]);
   });
 
@@ -1134,9 +1168,8 @@ body { margin: 0; }
     const map = new Map();
     if (mode === "fbo") {
       fbo.items.forEach((it) => {
-        const info = gtinMap[it.gtin] || {};
-        const k = info.article || ("баркод " + barcodeOf(it.gtin));
-        if (!map.has(k)) map.set(k, { article: k, name: info.name || "", codes: [], full: [] });
+        const k = itemArticle(it) || ("GTIN " + it.gtin);
+        if (!map.has(k)) map.set(k, { article: k, name: itemName(it), codes: [], full: [] });
         map.get(k).codes.push(kizKey(it.kiz));
         map.get(k).full.push(normKiz(it.kiz));
       });
@@ -1206,7 +1239,7 @@ body { margin: 0; }
     try {
       const aoa = [["Артикул продавца", "Наименование", "Код маркировки", mode === "fbo" ? "ШК короба" : "№ задания"]];
       if (mode === "fbo") {
-        fbo.items.map((it) => { const i = gtinMap[it.gtin] || {}; return [i.article || ("баркод " + barcodeOf(it.gtin)), i.name || "", kizKey(it.kiz), it.box]; })
+        fbo.items.map((it) => [itemArticle(it) || ("GTIN " + it.gtin), itemName(it), kizKey(it.kiz), it.box])
           .sort((a, b) => String(a[0]).localeCompare(String(b[0]))).forEach((r) => aoa.push(r));
       } else {
         state.rows.filter((r) => r.kiz).sort((a, b) => (a.article || "").localeCompare(b.article || ""))
