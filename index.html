@@ -150,6 +150,14 @@ body[data-mode="fbo"] .fbsonly, body[data-mode="fbs"] .fboonly { display: none !
 .fbohead > div:first-child { min-width: 0; flex: 1 1 260px; }
 .fbo .tablebox table { min-width: 0; }
 .fbo tr.curbox td:first-child { box-shadow: inset 4px 0 0 var(--warn); }
+.fbo tr.boxrow td { background: var(--accent-soft); padding-top: 10px; }
+.fbo td.qty { font-weight: 700; white-space: nowrap; }
+@media (max-width: 640px) {
+  .fbo #fbosum tr.boxrow { display: block; padding: 0; }
+  .fbo #fbosum tr.boxrow td { display: block; padding: 8px 12px; }
+  .fbo #fbosum td.name:empty { display: none; }
+}
+.fbo tr.boxrow.cur td { background: var(--sel); }
 .fbodetails summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
 .unk { border: 1px solid var(--warn); background: var(--warn-soft); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; }
 .unk .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -271,7 +279,7 @@ body { margin: 0; }
     <div id="fbounknown"></div>
     <div class="tablebox">
       <table>
-        <thead><tr><th>Баркод</th><th>Артикул</th><th>Товар</th><th>Кол-во</th><th id="fboboxh">Короб</th></tr></thead>
+        <thead><tr><th>Артикул</th><th>Кол-во</th><th>Баркод</th><th>Товар</th></tr></thead>
         <tbody id="fbosum"></tbody>
       </table>
     </div>
@@ -548,7 +556,7 @@ body { margin: 0; }
     const usesBoxes = fbo.items.some((it) => it.box) || !!fbo.box;
     $("fbostat").textContent = "Отсканировано КИЗ: " + fbo.items.length + (fbo.box ? " · текущий: " + boxLabel(fbo.box) : "");
     $("fbobox").hidden = !usesBoxes;
-    $("fboboxh").hidden = !usesBoxes;
+
     $("undo").disabled = !fbo.items.length;
     $("fbobox").disabled = $("fbolist").disabled = !fbo.items.length;
     const step = $("step");
@@ -564,9 +572,16 @@ body { margin: 0; }
       step.className = "step kiz";
       step.innerHTML = '<div class="badge">3</div><div class="title">Сканируйте КИЗ</div><div class="sub">Текущий баркод <b class="mono">' + esc(fbo.expect) + "</b>" + (a ? " (" + esc(a) + ")" : "") + boxNote + ". Для другого товара отсканируйте его баркод.</div>";
     }
-    $("fbosum").innerHTML = fboSummary().map((r) =>
-      '<tr class="' + (r.barcode && r.barcode === fbo.expect ? "curbox" : "") + '"><td class="num">' + (r.barcode ? esc(r.barcode) : '<span class="chip wait">неизвестен</span>') + "</td><td>" + esc(r.article || "—") + '</td><td class="name">' + esc(r.name) + '</td><td class="num">' + r.n + "</td>" + (usesBoxes ? '<td title="' + esc(r.box) + '">' + esc(boxLabel(r.box)) + "</td>" : "") + "</tr>"
-    ).join("") || '<tr><td colspan="5" class="file">Пока пусто</td></tr>';
+    // grouped by box: header row per box, then what is inside (article × quantity)
+    const sum = fboSummary();
+    const boxOrder = [...new Set(sum.map((r) => r.box))].sort((a, b) => boxNo(a) - boxNo(b));
+    $("fbosum").innerHTML = boxOrder.map((bx) => {
+      const rows = sum.filter((r) => r.box === bx).sort((a, b) => String(a.article || a.barcode).localeCompare(String(b.article || b.barcode)));
+      const total = rows.reduce((n, r) => n + r.n, 0);
+      return '<tr class="boxrow' + (bx === fbo.box ? " cur" : "") + '"><td colspan="4"><b>' + esc(boxLabel(bx)) + "</b> · " + total + " шт." +
+        (bx === fbo.box ? ' <span class="chip ok">текущий</span>' : "") + (boxLabel(bx) !== bx ? ' <span class="file mono">' + esc(bx) + "</span>" : "") + "</td></tr>" +
+        rows.map((r) => '<tr class="' + (bx === fbo.box && r.barcode && r.barcode === fbo.expect ? "curbox" : "") + '"><td><b>' + esc(r.article || "артикул ?") + '</b></td><td class="num qty">' + r.n + ' шт.</td><td class="num">' + (r.barcode ? esc(r.barcode) : '<span class="chip wait">неизвестен</span>') + '</td><td class="name">' + esc(r.name) + "</td></tr>").join("");
+    }).join("") || '<tr><td colspan="4" class="file">Пока пусто</td></tr>';
     $("fbocount").textContent = fbo.items.length;
     $("fboitems").innerHTML = fbo.items.map((it, i) =>
       '<tr><td class="num">' + esc(itemBarcode(it) || "—") + "</td><td>" + esc(itemArticle(it) || "GTIN " + it.gtin) + '</td><td title="' + esc(it.box) + '">' + esc(boxLabel(it.box)) + '</td><td class="kizcell">' + kizHtml(it.kiz) + '</td><td><button class="x" type="button" data-fdel="' + i + '" aria-label="Удалить КИЗ">×</button></td></tr>').reverse().join("");
