@@ -746,7 +746,22 @@ body { margin: 0; }
   }
   function resetBuf() { evbuf = []; pasted = false; }
   scan.addEventListener("paste", () => { pasted = true; });
-  scan.addEventListener("input", () => { if (!scan.value) resetBuf(); });
+  // Russian layout → Latin (same keys), for input that bypasses keydown (paste, on-screen keyboards)
+  const RU2EN = (() => {
+    const ru = "ёйцукенгшщзхъфывапролджэячсмитьбю", en = "`qwertyuiop[]asdfghjkl;'zxcvbnm,.";
+    const ruU = "ЁЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ", enU = "~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>";
+    const m = { "№": "#" };
+    for (let i = 0; i < ru.length; i++) { m[ru[i]] = en[i]; m[ruU[i]] = enU[i]; }
+    return m;
+  })();
+  scan.addEventListener("input", () => {
+    if (!scan.value) { resetBuf(); return; }
+    if (/[\u0400-\u04ff№]/.test(scan.value)) {
+      const pos = scan.selectionStart;
+      scan.value = scan.value.replace(/[\u0400-\u04ff№]/g, (c) => RU2EN[c] ?? "");
+      try { scan.setSelectionRange(pos, pos); } catch (e) {}
+    }
+  });
   scan.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === "Tab") {
       sawEnter = true; clearTimeout(autoTimer);
@@ -761,6 +776,11 @@ body { margin: 0; }
     if (e.key === "Backspace" || e.key === "Delete") { pasted = true; return; }
     if (e.key && e.key.length === 1) {
       evbuf.push({ key: e.key, ev: { code: e.code, shiftKey: e.shiftKey, getModifierState: () => !!(e.getModifierState && e.getModifierState("CapsLock")) } });
+      // keep the field Latin-only: a Cyrillic char is replaced right away by the Latin key on the same physical button
+      if (/[^\x00-\x7f]/.test(e.key)) {
+        const ch = charFromCode(e) ?? RU2EN[e.key];
+        if (ch != null) { e.preventDefault(); insert(ch); }
+      }
     }
   });
   // Scanners that don't send Enter: if characters arrived at scanner speed, submit after a short pause
