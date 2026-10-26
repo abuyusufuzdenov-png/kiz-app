@@ -246,12 +246,12 @@ body { margin: 0; }
   <section class="fbo fboonly" id="fbo">
     <div class="fbohead">
       <div>
-        <h2>Поставка FBO: баркод → КИЗ</h2>
+        <h2>Поставка FBO: короб → баркод → КИЗ</h2>
         <div class="file" id="fbostat"></div>
       </div>
       <div class="gbtns">
         <button type="button" id="fbolist" class="primary">Скачать Баркод – КИЗ (xlsx)</button>
-        <button type="button" id="fbobox" hidden>Файл коробов для WB</button>
+        <button type="button" id="fbobox" hidden>Скачать файл коробов для WB</button>
         <button type="button" id="fbocards" hidden>Загрузить карточки WB</button>
         <input type="file" id="fbocardsfile" class="vh" tabindex="-1" aria-hidden="true" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/octet-stream">
         <button type="button" id="fbonew">Новая поставка</button>
@@ -328,7 +328,8 @@ body { margin: 0; }
   </section>
 
   <footer class="fboonly">
-    <p>Порядок работы: сканируете баркод товара (с этикетки WB), затем его КИЗ. Следующий товар — снова баркод, потом КИЗ. Если подряд идут одинаковые товары, баркод можно сканировать один раз: он остаётся текущим, пока не отсканируете другой.</p>
+    <p>Порядок работы: сканируете QR-код короба (этикетка WB), затем товары в этом коробе: баркод товара → КИЗ. Для следующего короба сканируете его QR и продолжаете.</p>
+    <p>Если подряд идут одинаковые товары, баркод можно сканировать один раз: он остаётся текущим, пока не отсканируете другой баркод или короб.</p>
     <p>Если КИЗ окажется от другого товара (не того, чей баркод отсканирован), приложение пискнет и не запишет его.</p>
   </footer>
   <footer class="fbsonly">
@@ -417,13 +418,23 @@ body { margin: 0; }
     for (let i = 0; i < 12; i++) sum += (+d[i]) * (i % 2 ? 3 : 1);
     return (10 - sum % 10) % 10 === +d[12];
   }
+  function boxId(v) {
+    const t = String(v).trim();
+    const m = /WB_\d+/i.exec(t);
+    if (m) return m[0].toUpperCase();
+    if (/^\d{6,12}$/.test(t)) return t;
+    const d = /(?:^|\D)(\d{8,12})(?:\D|$)/.exec(t);
+    if (/^https?:/i.test(t) && d) return d[1];
+    return t.length <= 64 ? t : t.slice(0, 64);
+  }
   function articleOfBarcode(b) {
     if (bcMap[b]) return bcMap[b].article;
     const g = Object.keys(gtinMap).find((k) => gtinMap[k].barcode === b);
     return g ? gtinMap[g].article : "";
   }
   function processFbo(v) {
-    if (isKiz(v)) return addFboKiz(v);
+    // in FBO a long QR (box label) must not be mistaken for a KIZ: KIZ always starts with 01 + GTIN + 21
+    if (/^01\d{14}21/.test(normKiz(v))) return addFboKiz(v);
     const digits = v.replace(/\s/g, "");
     if (eanValid(digits) || (/^\d{8,14}$/.test(digits) && bcMap[digits])) {
       fbo.expect = digits;
@@ -432,7 +443,15 @@ body { margin: 0; }
       note("ok", "Баркод " + digits + (a ? " (" + a + ")" : "") + ". Теперь сканируйте КИЗ этого товара.");
       beep(true); render(); return;
     }
-    fail("Код «" + v + "» не похож ни на баркод товара, ни на КИЗ. Сканируйте баркод с этикетки WB (13 цифр), затем Data Matrix.");
+    // anything else is a box label (QR of the WB box sticker, e.g. 12200541)
+    const box = boxId(v);
+    if (!box) return fail("Код «" + v + "» не похож ни на короб, ни на баркод, ни на КИЗ.");
+    fbo.box = box;
+    fbo.expect = "";
+    saveFbo(); render();
+    const n = fbo.items.filter((it) => it.box === fbo.box).length;
+    note("ok", "Короб " + fbo.box + (n ? " (в нём уже " + n + " шт.)" : "") + ". Теперь сканируйте баркод товара, затем его КИЗ.");
+    beep(true);
   }
   function addFboKiz(v) {
     v = normKiz(v);
@@ -442,7 +461,8 @@ body { margin: 0; }
     if (dupF) return fail("Этот КИЗ уже отсканирован в короб " + dupF.box + ".");
     const dupS = state.rows.find((r) => r.kiz && kizKey(r.kiz) === key);
     if (dupS) return fail("Этот КИЗ уже привязан к FBS-заданию " + rowLabel(dupS) + ".");
-    const item = { kiz: v, box: fbo.box || "", gtin };
+    if (!fbo.box) return fail("Сначала отсканируйте QR-код короба, потом баркод и КИЗ товаров.");
+    const item = { kiz: v, box: fbo.box, gtin };
     if (!fbo.expect && !wbBarcode(gtin)) return fail("Сначала отсканируйте баркод товара (с этикетки WB), потом КИЗ.");
     if (fbo.expect) {
       const want = fbo.expect;
@@ -454,7 +474,7 @@ body { margin: 0; }
       const takenByOther = ownerG && !(g.article && gtinMap[ownerG].article === g.article);
       if (otherArticle || takenByOther || (known && !(artWant && artWant === g.article))) {
         render();
-        return fail("КИЗ от другого товара: баркод " + want + (artWant ? " (" + artWant + ")" : "") + ", а этот КИЗ относится к " + (g.article || "баркоду " + g.barcode) + ". Проверьте этикетку.");
+        return fail("КИЗ от другого товара: баркод " + want + (artWant ? " (" + artWant + ")" : "") + ", а этот КИЗ относится к " + (g.article || (g.barcode ? "баркоду " + g.barcode : "другому товару")) + ". Проверьте этикетку.");
       }
       if (!g.barcode) { gtinMap[gtin] = Object.assign({}, g, { barcode: want, article: g.article || artWant || "" }); saveGtin(); }
       item.barcode = want;
@@ -463,7 +483,8 @@ body { margin: 0; }
     saveFbo(); render();
     const bc = itemBarcode(item), art = itemArticle(item);
     const same = fbo.items.filter((it) => itemBarcode(it) === bc).length;
-    note("ok", "КИЗ записан: баркод " + bc + (art ? " (" + art + ")" : "") + (item.box ? ", короб " + item.box : "") + ". По этому баркоду " + same + " шт., всего " + fbo.items.length + ". Следующий: баркод, затем КИЗ.");
+    const inBox = fbo.items.filter((it) => it.box === item.box).length;
+    note("ok", "КИЗ записан: баркод " + bc + (art ? " (" + art + ")" : "") + " → короб " + item.box + " (в коробе " + inBox + " шт., всего " + fbo.items.length + "). Следующий: баркод, затем КИЗ.");
     beep(true);
   }
   function fboUndo() {
@@ -483,24 +504,27 @@ body { margin: 0; }
     return [...map.values()];
   }
   function renderFbo() {
-    $("title").textContent = "Поставка FBO: баркод и КИЗ";
+    $("title").textContent = "Поставка FBO: короба, баркоды, КИЗ";
     const boxes = [...new Set(fbo.items.map((it) => it.box))];
-    $("fileinfo").textContent = fbo.items.length ? "КИЗ: " + fbo.items.length + (boxes.filter(Boolean).length ? " · коробов: " + boxes.filter(Boolean).length : "") : "Сканируйте баркод товара, затем КИЗ";
-    const usesBoxes = false;
+    $("fileinfo").textContent = fbo.items.length ? "КИЗ: " + fbo.items.length + (boxes.filter(Boolean).length ? " · коробов: " + boxes.filter(Boolean).length : "") : "Сканируйте QR-код первого короба";
+    const usesBoxes = fbo.items.some((it) => it.box) || !!fbo.box;
     $("fbostat").textContent = "Отсканировано КИЗ: " + fbo.items.length + (fbo.box ? " · текущий короб: " + fbo.box : "");
     $("fbobox").hidden = !usesBoxes;
     $("fboboxh").hidden = !usesBoxes;
     $("undo").disabled = !fbo.items.length;
     $("fbobox").disabled = $("fbolist").disabled = !fbo.items.length;
     const step = $("step");
-    const boxNote = fbo.box ? " · короб <b class=\"mono\">" + esc(fbo.box) + "</b>" : "";
-    if (!fbo.expect) {
+    const boxNote = fbo.box ? " · короб <b class=\"mono\">" + esc(fbo.box) + "</b> (" + fbo.items.filter((it) => it.box === fbo.box).length + " шт.)" : "";
+    if (!fbo.box) {
       step.className = "step";
-      step.innerHTML = '<div class="badge">1</div><div class="title">Сканируйте баркод товара</div><div class="sub">Баркод с этикетки WB, потом КИЗ этого товара' + boxNote + ".</div>";
+      step.innerHTML = '<div class="badge">1</div><div class="title">Сканируйте QR-код короба</div><div class="sub">Этикетка WB на коробе. Потом в этот короб: баркод товара → КИЗ.</div>';
+    } else if (!fbo.expect) {
+      step.className = "step";
+      step.innerHTML = '<div class="badge">2</div><div class="title">Сканируйте баркод товара</div><div class="sub">Баркод с этикетки WB, потом КИЗ этого товара' + boxNote + ". Для другого короба отсканируйте его QR.</div>";
     } else {
       const a = articleOfBarcode(fbo.expect);
       step.className = "step kiz";
-      step.innerHTML = '<div class="badge">2</div><div class="title">Сканируйте КИЗ</div><div class="sub">Текущий баркод <b class="mono">' + esc(fbo.expect) + "</b>" + (a ? " (" + esc(a) + ")" : "") + boxNote + ". Для другого товара отсканируйте его баркод.</div>";
+      step.innerHTML = '<div class="badge">3</div><div class="title">Сканируйте КИЗ</div><div class="sub">Текущий баркод <b class="mono">' + esc(fbo.expect) + "</b>" + (a ? " (" + esc(a) + ")" : "") + boxNote + ". Для другого товара отсканируйте его баркод.</div>";
     }
     $("fbosum").innerHTML = fboSummary().map((r) =>
       '<tr class="' + (r.barcode && r.barcode === fbo.expect ? "curbox" : "") + '"><td class="num">' + (r.barcode ? esc(r.barcode) : '<span class="chip wait">неизвестен</span>') + "</td><td>" + esc(r.article || "—") + '</td><td class="name">' + esc(r.name) + '</td><td class="num">' + r.n + "</td>" + (usesBoxes ? '<td class="num">' + esc(r.box || "—") + "</td>" : "") + "</tr>"
@@ -539,7 +563,7 @@ body { margin: 0; }
   $("fbonewyes").addEventListener("click", () => {
     fbo = { items: [], box: "", expect: "" };
     saveFbo(); $("fbonewconfirm").hidden = true; render();
-    note("ok", "Начата новая поставка. Сканируйте баркод товара, затем КИЗ.");
+    note("ok", "Начата новая поставка. Сканируйте QR-код первого короба.");
   });
   $("fbocards").addEventListener("click", () => { picking = true; $("fbocardsfile").click(); setTimeout(() => { picking = false; }, 60000); });
   $("fbocardsfile").addEventListener("change", async (e) => {
@@ -943,7 +967,7 @@ body { margin: 0; }
   function render() {
     document.body.dataset.mode = mode;
     document.querySelectorAll(".modes [data-mode]").forEach((b) => b.setAttribute("aria-selected", b.dataset.mode === mode ? "true" : "false"));
-    scan.placeholder = mode === "fbo" ? "Сканируйте баркод товара, затем КИЗ" : "Сканируйте стикер или КИЗ, либо введите цифры стикера + Enter";
+    scan.placeholder = mode === "fbo" ? "QR короба → баркод товара → КИЗ" : "Сканируйте стикер или КИЗ, либо введите цифры стикера + Enter";
     if (mode === "fbo") return renderFbo();
     $("title").textContent = "Сборка FBS: КИЗ по стикеру";
     renderFbs();
@@ -1383,7 +1407,7 @@ body { margin: 0; }
     try {
       if (video.readyState >= 2) {
         const found = await detector.detect(video);
-        found.sort((a, b) => (a.format === "code_128" ? 0 : 1) - (b.format === "code_128" ? 0 : 1));
+        found.sort((a, b) => (a.format === "data_matrix" ? 1 : 0) - (b.format === "data_matrix" ? 1 : 0));
         for (const b of found) onCode(b.rawValue, b.format);
       }
     } catch (e) {}
@@ -1411,14 +1435,14 @@ body { margin: 0; }
     try {
       if ("BarcodeDetector" in window) {
         const fm = await BarcodeDetector.getSupportedFormats();
-        if (fm.includes("data_matrix")) detector = new BarcodeDetector({ formats: ["data_matrix", "code_128"].filter((x) => fm.includes(x)) });
+        if (fm.includes("data_matrix")) detector = new BarcodeDetector({ formats: ["data_matrix", "code_128", "qr_code", "ean_13"].filter((x) => fm.includes(x)) });
       }
     } catch (e) { detector = null; }
     if (detector) return camLoop();
     try {
       if (typeof ZXing === "undefined") await loadScript("https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js");
       const hints = new Map();
-      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.DATA_MATRIX, ZXing.BarcodeFormat.CODE_128]);
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.DATA_MATRIX, ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.EAN_13]);
       hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
       zxReader = new ZXing.BrowserMultiFormatReader(hints, 200);
       zxReader.decodeFromStream(stream, video, (res) => { if (res && camOn) onCode(res.getText(), ""); });
