@@ -1495,7 +1495,9 @@ body { margin: 0; }
       // FBS
       if (R.fbs && R.fbs.b64) {
         const sameFile = !state.demo && R.fbs.fileId === state.fileId;
-        if (!sameFile && (state.demo || (R.fbs.fileT || 0) > (state.fileT || 0))) {
+        const rT = R.fbs.fileT || 1, lT = state.fileT || 1;
+        // newer file wins; equal times (files loaded before sync existed) are decided the same way on every device
+        if (!sameFile && (state.demo || rT > lT || (rT === lT && String(R.fbs.fileId) > String(state.fileId)))) {
           const kizOv = {}, kizT = {};
           Object.keys(R.fbs.kiz || {}).forEach((r) => { kizOv[r] = R.fbs.kiz[r].v; kizT[r] = R.fbs.kiz[r].t; });
           loadBuffer(b64ToBuf(R.fbs.b64), R.fbs.fileName, kizOv);
