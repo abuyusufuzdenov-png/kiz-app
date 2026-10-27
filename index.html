@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>КИЗ Сканер</title>
-<meta name="theme-color" content="#1d5d86">
+<meta name="theme-color" content="#111111">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -13,32 +13,33 @@
 <style>
 /* Layout: a packing-station tool. Sticky scan bar on top, current-order card, then the order table. */
 :root {
-  --bg: #eef1f0;
+  /* NITTIONE: black & white; colour only where it carries meaning (accepted / error / warning) */
+  --bg: #f3f3f3;
   --panel: #ffffff;
-  --ink: #17221d;
-  --muted: #5d6b64;
-  --line: #d5dcd8;
-  --accent: #1d5d86;
-  --accent-soft: #e2edf5;
+  --ink: #111111;
+  --muted: #6b6b6b;
+  --line: #e0e0e0;
+  --accent: #111111;
+  --accent-soft: #f0f0f0;
   --ok: #1d7a4a;
-  --ok-soft: #e1f3e8;
-  --warn: #9a6400;
-  --warn-soft: #fbf0d9;
+  --ok-soft: #e3f3e9;
+  --warn: #8a5a00;
+  --warn-soft: #fbf1dc;
   --err: #b3261e;
   --err-soft: #fbe3e1;
-  --sel: #fff6c9;
-  --font-body: "IBM Plex Sans", "Segoe UI", Roboto, Arial, sans-serif;
+  --sel: #ececec;
+  --font-body: "Manrope", "Segoe UI", Roboto, Arial, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-  --bg: #121815; --panel: #1b231f; --ink: #e6ece9; --muted: #98a59f; --line: #2e3a34;
-  --accent: #7db8e0; --accent-soft: #1d2d39; --ok: #6fd19b; --ok-soft: #173325;
-  --warn: #e9b65a; --warn-soft: #362a12; --err: #ff8a80; --err-soft: #3b1a18; --sel: #3a3416;
+  --bg: #0c0c0c; --panel: #171717; --ink: #f2f2f2; --muted: #9a9a9a; --line: #2c2c2c;
+  --accent: #f2f2f2; --accent-soft: #232323; --ok: #6fd19b; --ok-soft: #14301f;
+  --warn: #e9b65a; --warn-soft: #33270f; --err: #ff8a80; --err-soft: #3a1917; --sel: #262626;
   color-scheme: dark; } }
 :root[data-theme="dark"] {
-  --bg: #121815; --panel: #1b231f; --ink: #e6ece9; --muted: #98a59f; --line: #2e3a34;
-  --accent: #7db8e0; --accent-soft: #1d2d39; --ok: #6fd19b; --ok-soft: #173325;
-  --warn: #e9b65a; --warn-soft: #362a12; --err: #ff8a80; --err-soft: #3b1a18; --sel: #3a3416;
+  --bg: #0c0c0c; --panel: #171717; --ink: #f2f2f2; --muted: #9a9a9a; --line: #2c2c2c;
+  --accent: #f2f2f2; --accent-soft: #232323; --ok: #6fd19b; --ok-soft: #14301f;
+  --warn: #e9b65a; --warn-soft: #33270f; --err: #ff8a80; --err-soft: #3a1917; --sel: #262626;
   color-scheme: dark; }
 
 * { box-sizing: border-box; }
@@ -112,7 +113,7 @@ tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--bg); }
 tr.done td:first-child { box-shadow: inset 4px 0 0 var(--ok); }
 tr.sel { background: var(--sel) !important; }
-tr.sel td:first-child { box-shadow: inset 4px 0 0 var(--warn); }
+tr.sel td:first-child { box-shadow: inset 4px 0 0 var(--ink); }
 tr.flash { animation: flash 1s ease-out; }
 @keyframes flash { from { background: var(--ok-soft); } to { background: transparent; } }
 .chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
@@ -151,7 +152,7 @@ body[data-mode="fbo"] .fbsonly, body[data-mode="fbs"] .fboonly { display: none !
 .fbohead { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: flex-start; }
 .fbohead > div:first-child { min-width: 0; flex: 1 1 260px; }
 .fbo .tablebox table { min-width: 0; }
-.fbo tr.curbox td:first-child { box-shadow: inset 4px 0 0 var(--warn); }
+.fbo tr.curbox td:first-child { box-shadow: inset 4px 0 0 var(--ink); }
 .fbo tr.boxrow td { background: var(--accent-soft); padding-top: 10px; }
 .fbo td.qty { font-weight: 700; white-space: nowrap; }
 @media (max-width: 640px) {
@@ -227,6 +228,15 @@ button.danger { background: var(--err); border-color: var(--err); color: var(--p
   .donetoggle { width: 100%; justify-content: center; font-size: 14px; }
   #rows tr.hidedone { display: none; }
 }
+.brand { font-weight: 800; letter-spacing: .32em; font-size: 13px; text-transform: uppercase; margin-bottom: 2px; }
+h1 { letter-spacing: -0.01em; }
+.step .badge { background: var(--ink); color: var(--panel); }
+.step.kiz { background: var(--sel); box-shadow: inset 4px 0 0 var(--ink); }
+.step.kiz .badge { background: var(--ink); }
+tr.sel { box-shadow: inset 4px 0 0 var(--ink); }
+.bar i { background: var(--ink); }
+.bigstat .done { color: var(--ink); }
+.flash.info { background: rgba(17, 17, 17, .92) !important; }
 .confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
 footer { color: var(--muted); font-size: 13px; max-width: 70ch; }
 footer p { margin: 4px 0; }
@@ -274,6 +284,7 @@ body { margin: 0; }
 <div class="wrap">
   <header>
     <div>
+      <div class="brand">NITTIONE</div>
       <h1 id="title">КИЗ Сканер</h1>
       <div class="modes" role="tablist">
         <button type="button" role="tab" data-mode="fbs">Сборка FBS</button>

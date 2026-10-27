@@ -1,5 +1,5 @@
 {
-  "name": "КИЗ Сканер",
+  "name": "КИЗ Сканер NITTIONE",
   "short_name": "КИЗ Сканер",
   "description": "Привязка КИЗ к сборочным заданиям WB по стикеру и коды для УПД",
   "lang": "ru",
@@ -7,11 +7,26 @@
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#eef1f0",
-  "theme_color": "#1d5d86",
+  "background_color": "#f3f3f3",
+  "theme_color": "#111111",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }
