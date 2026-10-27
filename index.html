@@ -272,6 +272,11 @@ body { margin: 0; }
   thead { display: none; }
   tbody tr { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
   tbody td { border: none; padding: 0; }
+  tbody tr { padding-left: 18px; }
+  tbody tr td:first-child { box-shadow: none !important; }
+  tbody tr.done { box-shadow: inset 5px 0 0 var(--ok); }
+  tbody tr.sel { box-shadow: inset 5px 0 0 var(--ink); }
+  .fbo tbody tr.curbox { box-shadow: inset 5px 0 0 var(--ink); }
   td.name, td.kizcell { grid-column: 1 / -1; max-width: none; }
   .station { position: static; }
   footer { display: none; }
