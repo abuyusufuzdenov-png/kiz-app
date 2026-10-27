@@ -253,6 +253,7 @@ body { margin: 0; }
         </select>
       </label>
       <label><input type="checkbox" id="sound" checked> Звук</label>
+      <button type="button" id="soundtest" class="x" style="font-size:13px;border:1px solid var(--line);border-radius:6px;padding:4px 8px">Проверить звук</button>
       <label><input type="checkbox" id="layoutfix" checked> Исправлять русскую раскладку</label>
       <label><input type="checkbox" id="nokbd"> Скрыть экранную клавиатуру (для сканера на телефоне)</label>
     </div>
@@ -1029,18 +1030,40 @@ body { margin: 0; }
   function fail(text) { note("err", text); beep(false); }
   let ac = null;
   function beep(ok) {
+    // vibration helps in a noisy warehouse (phones only)
+    try { if (navigator.vibrate) navigator.vibrate(ok ? 80 : [250, 100, 250, 100, 250]); } catch (e) {}
     if (!$("sound").checked) return;
     try {
       ac = ac || new (window.AudioContext || window.webkitAudioContext)();
-      const play = (f, t0, d) => {
-        const o = ac.createOscillator(), g = ac.createGain();
-        o.type = ok ? "sine" : "square"; o.frequency.value = f;
-        g.gain.setValueAtTime(0.12, ac.currentTime + t0); g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + t0 + d);
-        o.connect(g); g.connect(ac.destination); o.start(ac.currentTime + t0); o.stop(ac.currentTime + t0 + d);
+      if (ac.state === "suspended") ac.resume();
+      // master chain: loud but without clipping distortion
+      const comp = ac.createDynamicsCompressor();
+      comp.threshold.value = -6; comp.ratio.value = 4;
+      const master = ac.createGain();
+      master.gain.value = 1.0;
+      comp.connect(master); master.connect(ac.destination);
+      const tone = (f, t0, d, type) => {
+        const o = ac.createOscillator(), g = ac.createGain(), at = ac.currentTime + t0;
+        o.type = type; o.frequency.setValueAtTime(f, at);
+        g.gain.setValueAtTime(0.0001, at);
+        g.gain.linearRampToValueAtTime(0.9, at + 0.01);
+        g.gain.setValueAtTime(0.9, at + d - 0.03);
+        g.gain.linearRampToValueAtTime(0.0001, at + d);
+        o.connect(g); g.connect(comp); o.start(at); o.stop(at + d + 0.02);
       };
-      if (ok) play(1320, 0, 0.09); else { play(220, 0, 0.18); play(180, 0.2, 0.25); }
+      if (ok) {
+        // success: two sharp high beeps, like a store scanner
+        tone(2400, 0, 0.09, "square");
+        tone(2400, 0.13, 0.09, "square");
+      } else {
+        // error: three long low buzzes
+        tone(300, 0, 0.28, "sawtooth");
+        tone(300, 0.36, 0.28, "sawtooth");
+        tone(240, 0.72, 0.4, "sawtooth");
+      }
     } catch (e) {}
   }
+
 
   // ---------- render ----------
   function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -1411,6 +1434,7 @@ body { margin: 0; }
   applyKbd();
   $("nokbd").addEventListener("change", () => { applyKbd(); scan.blur(); setTimeout(() => scan.focus(), 50); });
   $("undo").addEventListener("click", () => (mode === "fbo" ? fboUndo() : undo()));
+  $("soundtest").addEventListener("click", () => { beep(true); setTimeout(() => beep(false), 700); scan.focus({ preventScroll: true }); });
 
   // ---------- export ----------
   const downloads = {
@@ -1650,7 +1674,7 @@ body { margin: 0; }
     lastVal = v; lastAt = now;
     const before = $("msg").textContent + "|" + state.selected;
     process(v);
-    if (navigator.vibrate) navigator.vibrate($("msg").classList.contains("err") ? [80, 60, 80] : 60);
+    
     const f = $("camflash"); f.classList.add("on"); setTimeout(() => f.classList.remove("on"), 60);
     camUpdate();
   }
