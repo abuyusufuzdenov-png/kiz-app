@@ -125,6 +125,8 @@ tr.flash { animation: flash 1s ease-out; }
 .upd { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 14px; }
 .updhead { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: flex-start; }
 .updhead > div { min-width: 0; flex: 1 1 320px; }
+.upd > *, .fbo > *, .updxml > * { min-width: 0; }
+.upd select, .fbo select { width: 100%; }
 h2 { font-size: 17px; margin: 0 0 4px; }
 .groups { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
 .group { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 8px; min-width: 0; }
@@ -194,6 +196,37 @@ button.danger { background: var(--err); border-color: var(--err); color: var(--p
   .msg { padding: 8px 10px; font-size: 14px; }
   .lastscan { font-size: 12px; }
 }
+.mobonly, .flash { display: none; }
+@media (max-width: 640px) {
+  .mobonly { display: block; }
+  .mobonly[hidden] { display: none; }
+  /* 1. big feedback after each scan */
+  .flash { display: flex; position: fixed; inset: 0; z-index: 60; align-items: center; justify-content: center; pointer-events: none;
+    opacity: 0; transition: opacity .35s ease-out; padding: 24px; }
+  .flash.show { opacity: 1; transition: none; }
+  .flash.ok { background: rgba(29, 122, 74, .92); }
+  .flash.err { background: rgba(179, 38, 30, .94); }
+  .flash.info { background: rgba(29, 93, 134, .90); }
+  .flashbox { text-align: center; color: #fff; display: grid; gap: 8px; max-width: 100%; }
+  .flashicon { font-size: 84px; line-height: 1; font-weight: 700; }
+  .flashtitle { font-size: 30px; font-weight: 700; overflow-wrap: anywhere; text-wrap: balance; }
+  .flashsub { font-size: 18px; opacity: .92; overflow-wrap: anywhere; text-wrap: balance; }
+  /* 2. scan field and camera docked at the bottom, under the thumb */
+  .station .scanrow { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--panel);
+    border-top: 1px solid var(--line); box-shadow: 0 -6px 18px -10px rgba(0,0,0,.35);
+    padding: 10px max(12px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); }
+  .station .scanrow #scan { font-size: 15px; padding: 14px 12px; }
+  .wrap { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  /* 3. big counters */
+  .bigstat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .bigstat .nums { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .bigstat .big { font-size: 34px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .bigstat .lbl { font-size: 13px; color: var(--muted); }
+  .bigstat .right { text-align: right; }
+  .bigstat .done { color: var(--ok); }
+  .donetoggle { width: 100%; justify-content: center; font-size: 14px; }
+  #rows tr.hidedone { display: none; }
+}
 .confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
 footer { color: var(--muted); font-size: 13px; max-width: 70ch; }
 footer p { margin: 4px 0; }
@@ -237,6 +270,7 @@ body { margin: 0; }
 </head>
 <body>
 
+<div class="flash" id="flash" aria-hidden="true"><div class="flashbox"><div class="flashicon" id="flashicon"></div><div class="flashtitle" id="flashtitle"></div><div class="flashsub" id="flashsub"></div></div></div>
 <div class="wrap">
   <header>
     <div>
@@ -259,6 +293,7 @@ body { margin: 0; }
 
   <div class="demo fbsonly" id="demo">Сейчас на странице пример из трёх выдуманных заданий. Загрузите свой файл template-sgtin, чтобы начать работу.</div>
 
+  <div class="bigstat mobonly" id="bigstat"></div>
   <section class="station" aria-live="polite">
     <div class="scanrow">
       <input id="scan" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
@@ -319,6 +354,7 @@ body { margin: 0; }
     </details>
   </section>
 
+  <button type="button" class="donetoggle fbsonly mobonly" id="donetoggle" hidden></button>
   <div class="tablebox fbsonly">
     <table>
       <thead><tr><th>№ задания</th><th>Стикер</th><th>Товар</th><th>Артикул</th><th>КИЗ</th><th></th></tr></thead>
@@ -516,6 +552,7 @@ body { margin: 0; }
       saveFbo();
       const a = articleOfBarcode(digits);
       note("ok", "Баркод " + digits + (a ? " (" + a + ")" : "") + ". Теперь сканируйте КИЗ этого товара.");
+      flash("info", "→", a || digits, "Теперь КИЗ");
       beep(true); render(); return;
     }
     // anything else is a box label (QR of the WB box sticker, e.g. 12200541)
@@ -526,6 +563,7 @@ body { margin: 0; }
     saveFbo(); render();
     const n = fbo.items.filter((it) => it.box === fbo.box).length;
     note("ok", boxLabel(fbo.box).replace(/^(\d)/, "Короб $1") + (n ? " (в нём уже " + n + " шт.)" : "") + " — QR: " + fbo.box + ". Теперь сканируйте баркод товара, затем его КИЗ.");
+    flash("info", "▣", boxLabel(fbo.box).replace(/^(\d)/, "Короб $1"), n ? "в нём уже " + n + " шт." : "Новый короб");
     beep(true);
   }
   function addFboKiz(v) {
@@ -559,6 +597,7 @@ body { margin: 0; }
     const bc = itemBarcode(item), art = itemArticle(item);
     const same = fbo.items.filter((it) => itemBarcode(it) === bc).length;
     const inBox = fbo.items.filter((it) => it.box === item.box).length;
+    flash("ok", "✓", art || bc, boxLabel(item.box) + " · " + inBox + " шт.");
     note("ok", "КИЗ записан: баркод " + bc + (art ? " (" + art + ")" : "") + " → " + boxLabel(item.box) + " (в коробе " + inBox + " шт., всего " + fbo.items.length + "). Следующий: баркод, затем КИЗ.");
     beep(true);
   }
@@ -580,6 +619,12 @@ body { margin: 0; }
     return [...map.values()];
   }
   function renderFbo() {
+    {
+      const inBox = fbo.box ? fbo.items.filter((it) => it.box === fbo.box).length : 0;
+      $("bigstat").hidden = false;
+      $("bigstat").innerHTML = '<div class="nums"><div><div class="big">' + inBox + '</div><div class="lbl">' + (fbo.box ? esc(boxLabel(fbo.box).replace(/^(\d)/, "Короб $1")) : "короб не выбран") + '</div></div>' +
+        '<div class="right"><div class="big done">' + fbo.items.length + '</div><div class="lbl">всего в поставке</div></div></div>';
+    }
     $("title").textContent = "Поставка FBO: короба, баркоды, КИЗ";
     const boxes = [...new Set(fbo.items.map((it) => it.box))];
     $("fileinfo").textContent = fbo.items.length ? "КИЗ: " + fbo.items.length + (boxes.filter(Boolean).length ? " · коробов: " + boxes.filter(Boolean).length : "") : "Сканируйте QR-код первого короба";
@@ -999,7 +1044,7 @@ body { margin: 0; }
     if (tr) tr.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     if (row.kiz) note("warn", "У задания " + rowLabel(row) + " уже есть КИЗ. Новый скан КИЗ заменит его.");
     else hideMsg();
-    if (fromScan) beep(true);
+    if (fromScan) { beep(true); flash("info", "→", row.article || "Задание " + row.order, "Теперь КИЗ"); }
     scan.focus({ preventScroll: true });
   }
 
@@ -1027,6 +1072,7 @@ body { margin: 0; }
     const tr = document.querySelector('tr[data-i="' + i + '"]');
     if (tr) { tr.classList.remove("flash"); void tr.offsetWidth; tr.classList.add("flash"); }
     const left = state.rows.filter((r) => !r.kiz).length;
+    flash("ok", "✓", row.article || rowLabel(row), left ? "Осталось " + left : "Все задания собраны");
     note("ok", (replaced ? "КИЗ заменён: " : "КИЗ записан: ") + rowLabel(row) + ", " + (row.article || "") +
       (left ? ". Осталось " + left + ". Сканируйте следующий стикер." : ". Все задания заполнены, можно скачивать файл."));
     beep(true);
@@ -1056,7 +1102,18 @@ body { margin: 0; }
   // ---------- feedback ----------
   function note(kind, text) { const m = $("msg"); m.className = "msg " + kind; m.textContent = text; m.hidden = false; }
   function hideMsg() { $("msg").hidden = true; }
-  function fail(text) { note("err", text); beep(false); }
+  function fail(text) { note("err", text); beep(false); flash("err", "✕", text.split(/[.!]\s/)[0], ""); }
+  const NARROW = matchMedia("(max-width: 640px)");
+  let flashTimer = null;
+  function flash(kind, icon, title, sub) {
+    if (!NARROW.matches) return;
+    const f = $("flash");
+    $("flashicon").textContent = icon; $("flashtitle").textContent = title || ""; $("flashsub").textContent = sub || "";
+    f.className = "flash " + kind + " show";
+    clearTimeout(flashTimer);
+    // let the colour hold for a moment, then fade out (errors stay longer)
+    flashTimer = setTimeout(() => { f.classList.remove("show"); }, kind === "err" ? 1400 : kind === "ok" ? 650 : 500);
+  }
   let ac = null;
   function beep(ok) {
     // vibration helps in a noisy warehouse (phones only)
@@ -1110,8 +1167,15 @@ body { margin: 0; }
     $("title").textContent = "Сборка FBS: КИЗ по стикеру";
     renderFbs();
   }
+  let showDone = false;
+  $("donetoggle").addEventListener("click", () => { showDone = !showDone; render(); });
   function renderFbs() {
     const done = state.rows.filter((r) => r.kiz).length, total = state.rows.length;
+    $("bigstat").innerHTML = state.demo ? "" : '<div class="nums"><div><div class="big' + (done === total ? " done" : "") + '">' + (total - done) + '</div><div class="lbl">осталось собрать</div></div>' +
+      '<div class="right"><div class="big done">' + done + '</div><div class="lbl">из ' + total + " готово</div></div></div>";
+    $("bigstat").hidden = state.demo;
+    $("donetoggle").hidden = state.demo || !done || done === total;
+    $("donetoggle").textContent = showDone ? "Скрыть собранные (" + done + ")" : "Показать собранные (" + done + ")";
     $("count").textContent = done + " / " + total;
     $("barfill").style.width = total ? (done / total * 100) + "%" : "0";
     $("demo").hidden = !state.demo;
@@ -1135,7 +1199,7 @@ body { margin: 0; }
     renderUpd();
     const tb = $("rows");
     tb.innerHTML = state.rows.map((r, i) => {
-      const cls = [r.kiz ? "done" : "", state.selected === i ? "sel" : ""].join(" ");
+      const cls = [r.kiz ? "done" : "", state.selected === i ? "sel" : "", r.kiz && !showDone && state.selected !== i && done !== total ? "hidedone" : ""].join(" ");
       return '<tr data-i="' + i + '" class="' + cls + '">' +
         '<td class="num">' + esc(r.order) + "</td>" +
         '<td class="num">' + stickerHtml(r.sticker) + "</td>" +
