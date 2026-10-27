@@ -1,4 +1,4 @@
-const CACHE = "kiz-scanner-v26";
+const CACHE = "kiz-scanner-v27";
 const SHELL = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png",
   "xlsx.full.min.js"];
 self.addEventListener("install", (e) => {
