@@ -170,6 +170,30 @@ button.danger { background: var(--err); border-color: var(--err); color: var(--p
 .syncbody input { font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); flex: 1 1 260px; min-width: 0; }
 .chip.ok2 { background: var(--ok-soft); color: var(--ok); }
 .chip.err2 { background: var(--err-soft); color: var(--err); }
+.optsbox summary { cursor: pointer; font-size: 13px; color: var(--muted); font-weight: 600; }
+.optsbox[open] summary { margin-bottom: 8px; }
+.kbdbtn { display: none; font-size: 20px; padding: 0 12px; }
+.kbdbtn.on { background: var(--accent-soft); border-color: var(--accent); }
+@media (pointer: coarse) { .kbdbtn { display: inline-flex; align-items: center; } }
+@media (max-width: 640px) {
+  .wrap { gap: 10px; padding-block: 8px 32px; }
+  h1 { font-size: 17px; }
+  .modes { margin: 4px 0 2px; }
+  .modes button { padding: 7px 14px; font-size: 14px; }
+  header { gap: 8px; }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .actions .progress { grid-column: 1 / -1; }
+  .actions button { font-size: 13px; padding: 8px 6px; justify-content: center; }
+  .station { padding: 10px; gap: 8px; border-radius: 10px; }
+  .scanrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
+  #scan { flex: none; width: 100%; font-size: 15px; padding: 10px 12px; }
+  .step { padding: 10px; gap: 2px 10px; }
+  .step .badge { width: 34px; height: 34px; font-size: 15px; }
+  .step .title { font-size: 16px; }
+  .step .sub { font-size: 13px; }
+  .msg { padding: 8px 10px; font-size: 14px; }
+  .lastscan { font-size: 12px; }
+}
 .confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
 footer { color: var(--muted); font-size: 13px; max-width: 70ch; }
 footer p { margin: 4px 0; }
@@ -181,6 +205,7 @@ body { margin: 0; }
 [hidden] { display: none !important; }
 :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 #cam { font-size: 16px; padding: 12px 18px; }
+@media (max-width: 640px) { #cam { font-size: 14px; padding: 8px 12px; } }
 .cam { position: fixed; inset: 0; z-index: 50; background: #000; display: flex; flex-direction: column; }
 .cam video { flex: 1; width: 100%; min-height: 0; object-fit: cover; }
 .camframe { position: absolute; left: 50%; top: 42%; width: min(70vw, 320px); aspect-ratio: 1; transform: translate(-50%, -50%);
@@ -239,11 +264,14 @@ body { margin: 0; }
       <input id="scan" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
         placeholder="Сканируйте стикер или КИЗ, либо введите цифры стикера + Enter" aria-label="Поле сканера">
       <button type="button" id="cam" class="primary">Камера</button>
+      <button type="button" id="kbdbtn" class="kbdbtn" title="Показать или скрыть клавиатуру" aria-label="Клавиатура">⌨</button>
     </div>
     <button type="button" class="focushint" id="focushint" hidden>Сканер сейчас не попадает на страницу. Нажмите сюда, затем сканируйте.</button>
     <div class="lastscan" id="lastscan" hidden></div>
     <div class="step" id="step"></div>
     <div class="msg" id="msg" hidden></div>
+    <details class="optsbox" id="optsbox">
+    <summary>Настройки</summary>
     <div class="opts">
       <label class="fbsonly">Формат КИЗ в файле
         <select id="kizmode">
@@ -257,6 +285,7 @@ body { margin: 0; }
       <label><input type="checkbox" id="layoutfix" checked> Исправлять русскую раскладку</label>
       <label><input type="checkbox" id="nokbd"> Скрыть экранную клавиатуру (для сканера на телефоне)</label>
     </div>
+    </details>
   </section>
 
   <section class="fbo fboonly" id="fbo">
@@ -1428,9 +1457,18 @@ body { margin: 0; }
   function applyKbd() {
     const on = $("nokbd").checked;
     scan.inputMode = on ? "none" : "text";
+    $("kbdbtn").classList.toggle("on", !on);
     try { localStorage.setItem("kiz-station-nokbd", on ? "1" : "0"); } catch (e) {}
   }
-  try { $("nokbd").checked = localStorage.getItem("kiz-station-nokbd") === "1"; } catch (e) {}
+  try {
+    const kv = localStorage.getItem("kiz-station-nokbd");
+    // on phones the keyboard is hidden by default: scanning goes through the scanner or the camera
+    $("nokbd").checked = kv === null ? matchMedia("(pointer: coarse)").matches : kv === "1";
+  } catch (e) {}
+  $("kbdbtn").addEventListener("click", () => {
+    $("nokbd").checked = !$("nokbd").checked; applyKbd();
+    scan.blur(); setTimeout(() => scan.focus(), 50);
+  });
   applyKbd();
   $("nokbd").addEventListener("change", () => { applyKbd(); scan.blur(); setTimeout(() => scan.focus(), 50); });
   $("undo").addEventListener("click", () => (mode === "fbo" ? fboUndo() : undo()));
@@ -1754,6 +1792,7 @@ body { margin: 0; }
   loadReq();
   if (!restore()) { state.rows = DEMO_ROWS.map((r) => Object.assign({}, r)); }
   render();
+  if (!matchMedia("(pointer: coarse)").matches) $("optsbox").open = true;
   initSync();
   if (!TOUCH) scan.focus();
 })();
