@@ -609,8 +609,20 @@ body { margin: 0; }
     flash("info", "▣", boxLabel(fbo.box).replace(/^(\d)/, "Короб $1"), n ? "в нём уже " + n + " шт." : "Новый короб");
     beep(true);
   }
+  let fboFix = null;
+  // the user confirmed (e.g. in the WB card) that barcode `bc` belongs to the article of this KIZ's GTIN: fix the directory
+  function fixBarcodeOwner(bc, gtin) {
+    const g = gtinMap[gtin] || {};
+    if (!g.article) return;
+    const t = Date.now();
+    bcMap[bc] = Object.assign({}, bcMap[bc] || {}, { article: g.article, name: g.name || (bcMap[bc] || {}).name || "", t });
+    Object.keys(gtinMap).forEach((k) => { if (k !== gtin && gtinMap[k].barcode === bc && gtinMap[k].article !== g.article) gtinMap[k] = Object.assign({}, gtinMap[k], { barcode: "", t }); });
+    if (!g.barcode || (g.barcode !== bc && articleOfBarcode(g.barcode) !== g.article)) gtinMap[gtin] = Object.assign({}, g, { barcode: bc, t });
+    saveGtin();
+  }
   function addFboKiz(v) {
     v = normKiz(v);
+    fboFix = null;
     if (/^01\d{14}21/.test(v) && v.length !== 31 && v.length !== 83) return fail("КИЗ считался не полностью (" + v.length + " симв. вместо 83). Отсканируйте его ещё раз.");
     const key = kizKey(v), gtin = gtinOf(v);
     const dupF = fbo.items.find((it) => kizKey(it.kiz) === key);
@@ -630,7 +642,12 @@ body { margin: 0; }
       const takenByOther = ownerG && !(g.article && gtinMap[ownerG].article === g.article);
       if (otherArticle || takenByOther || (known && !(artWant && artWant === g.article))) {
         render();
-        return fail("КИЗ от другого товара: баркод " + want + (artWant ? " (" + artWant + ")" : "") + ", а этот КИЗ относится к " + (g.article || (g.barcode ? "баркоду " + g.barcode : "другому товару")) + ". Проверьте этикетку.");
+        fail("КИЗ от другого товара: баркод " + want + (artWant ? " (" + artWant + ")" : "") + ", а этот КИЗ относится к " + (g.article || (g.barcode ? "баркоду " + g.barcode : "другому товару")) + ". Проверьте этикетку.");
+        if (g.article) {
+          fboFix = { v, want, gtin };
+          $("msg").insertAdjacentHTML("beforeend", '<div class="confirm" style="margin-top:8px"><span>Если в карточке WB баркод ' + esc(want) + " указан у " + esc(g.article) + ' — исправьте справочник:</span><button type="button" class="primary" id="fbofix">Баркод ' + esc(want) + " — это " + esc(g.article) + "</button></div>");
+        }
+        return;
       }
       if (!g.barcode) { gtinMap[gtin] = Object.assign({}, g, { barcode: want, article: g.article || artWant || "" }); saveGtin(); }
       item.barcode = want;
@@ -720,6 +737,14 @@ body { margin: 0; }
     if (it) fbo.del[kizKey(it.kiz)] = Date.now();
     saveFbo(); render();
     if (it) note("warn", "КИЗ удалён (" + boxLabel(it.box) + ").");
+  });
+  $("msg").addEventListener("click", (e) => {
+    if (!e.target.closest("#fbofix") || !fboFix) return;
+    const f = fboFix;
+    fixBarcodeOwner(f.want, f.gtin);
+    fbo.expect = f.want;
+    addFboKiz(f.v);
+    scan.focus({ preventScroll: true });
   });
   $("fbosum").addEventListener("change", (e) => {
     const i = e.target.closest("[data-boxnum]");
@@ -1732,8 +1757,9 @@ body { margin: 0; }
         fbo.items.sort((a, b) => (a.t || 0) - (b.t || 0));
       }
       // directories: keep local entries, take what is missing
-      Object.keys(R.gtin || {}).forEach((g) => { gtinMap[g] = Object.assign({}, R.gtin[g], gtinMap[g] || {}); });
-      Object.keys(R.bc || {}).forEach((b) => { if (!bcMap[b]) bcMap[b] = R.bc[b]; });
+      // entries corrected by hand carry a time `t`: the newer correction wins on every device
+      Object.keys(R.gtin || {}).forEach((g) => { const r = R.gtin[g], l = gtinMap[g]; gtinMap[g] = l && (r.t || 0) > (l.t || 0) ? Object.assign({}, l, r) : Object.assign({}, r, l || {}); });
+      Object.keys(R.bc || {}).forEach((b) => { const r = R.bc[b], l = bcMap[b]; if (!l || (r.t || 0) > (l.t || 0)) bcMap[b] = r; });
       Object.keys(R.boxnum || {}).forEach((b) => { if ((R.boxnum[b].t || 0) > ((boxNumMap[b] || {}).t || 0)) boxNumMap[b] = R.boxnum[b]; });
       // requisites: newer wins
       let lr = {};
