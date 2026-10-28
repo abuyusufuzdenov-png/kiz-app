@@ -155,6 +155,9 @@ body[data-mode="fbo"] .fbsonly, body[data-mode="fbs"] .fboonly { display: none !
 .fbo tr.curbox td:first-child { box-shadow: inset 4px 0 0 var(--ink); }
 .fbo tr.boxrow td { background: var(--accent-soft); padding-top: 10px; }
 .fbo td.qty { font-weight: 700; white-space: nowrap; }
+.boxnum { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); margin-left: 6px; }
+.boxnum input { font: inherit; font-family: var(--font-mono); width: 11ch; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+.boxnum input.need { border-color: var(--err); background: var(--err-soft); }
 @media (max-width: 640px) {
   .fbo #fbosum tr.boxrow { display: block; padding: 0; }
   .fbo #fbosum tr.boxrow td { display: block; padding: 8px 12px; }
@@ -500,7 +503,11 @@ body { margin: 0; }
   let gtinMap = {}, bcMap = {};
   try { gtinMap = JSON.parse(localStorage.getItem(GTIN_STORE) || "{}") || {}; } catch (e) {}
   try { bcMap = JSON.parse(localStorage.getItem(BC_STORE) || "{}") || {}; } catch (e) {}
-  function saveGtin() { try { localStorage.setItem(GTIN_STORE, JSON.stringify(gtinMap)); localStorage.setItem(BC_STORE, JSON.stringify(bcMap)); } catch (e) {} if (typeof scheduleSync === "function") scheduleSync(); }
+  // boxNumMap: QR content of a WB box label ("$Ts;…") → box number as shown in the WB cabinet (e.g. 13744350)
+  const BOXNUM_STORE = "kiz-boxnum-v1";
+  let boxNumMap = {};
+  try { boxNumMap = JSON.parse(localStorage.getItem(BOXNUM_STORE) || "{}") || {}; } catch (e) {}
+  function saveGtin() { try { localStorage.setItem(GTIN_STORE, JSON.stringify(gtinMap)); localStorage.setItem(BC_STORE, JSON.stringify(bcMap)); localStorage.setItem(BOXNUM_STORE, JSON.stringify(boxNumMap)); } catch (e) {} if (typeof scheduleSync === "function") scheduleSync(); }
   function gtinOf(kiz) { const m = /^01(\d{14})/.exec(normKiz(kiz)); return m ? m[1] : ""; }
   function learnGtin(kiz, article, name) {
     const g = gtinOf(kiz);
@@ -551,9 +558,21 @@ body { margin: 0; }
     if (fbo.box && !order.includes(fbo.box)) order.push(fbo.box);
     return order.indexOf(b) + 1;
   }
+  function boxWbNo(b) {
+    if (!b) return "";
+    if (/^\d{6,12}$/.test(b) || /^WB_\d+$/.test(b)) return b;
+    return (boxNumMap[b] && boxNumMap[b].n) || "";
+  }
+  function setBoxNum(b, n) {
+    n = String(n || "").replace(/\D/g, "");
+    if (!b || boxWbNo(b) === n) return;
+    boxNumMap[b] = { n, t: Date.now() };
+    saveGtin();
+  }
   function boxLabel(b) {
     if (!b) return "—";
-    return /^\d{6,12}$/.test(b) || /^WB_\d+$/.test(b) ? b : "Короб " + boxNo(b);
+    const n = boxWbNo(b);
+    return n ? n : "Короб " + boxNo(b);
   }
   function articleOfBarcode(b) {
     if (bcMap[b]) return bcMap[b].article;
@@ -572,7 +591,14 @@ body { margin: 0; }
       flash("info", "→", a || digits, "Теперь КИЗ");
       beep(true); render(); return;
     }
-    // anything else is a box label (QR of the WB box sticker, e.g. 12200541)
+    // a plain number while the current box (QR "$Ts;…") has no number yet → that is its number in the WB cabinet
+    if (fbo.box && /^\d{6,10}$/.test(digits) && !boxWbNo(fbo.box) && !/^\d{6,12}$/.test(fbo.box)) {
+      setBoxNum(fbo.box, digits); render();
+      note("ok", "Номер короба " + digits + " записан. Теперь сканируйте баркод товара, затем его КИЗ.");
+      flash("info", "▣", "Короб " + digits, "номер записан");
+      beep(true); return;
+    }
+    // anything else is a box label (QR of the WB box sticker)
     const box = boxId(v);
     if (!box) return fail("Код «" + v + "» не похож ни на короб, ни на баркод, ни на КИЗ.");
     fbo.box = box;
@@ -656,6 +682,9 @@ body { margin: 0; }
     if (!fbo.box) {
       step.className = "step";
       step.innerHTML = '<div class="badge">1</div><div class="title">Сканируйте QR-код короба</div><div class="sub">Этикетка WB на коробе. Потом в этот короб: баркод товара → КИЗ.</div>';
+    } else if (!boxWbNo(fbo.box) && !fbo.items.some((it) => it.box === fbo.box)) {
+      step.className = "step";
+      step.innerHTML = '<div class="badge">2</div><div class="title">Введите номер короба</div><div class="sub">Номер этого короба в кабинете WB (например 13744350) — наберите в поле скана + Enter. Можно пропустить и сразу сканировать баркод товара, номер вписать потом.</div>';
     } else if (!fbo.expect) {
       step.className = "step";
       step.innerHTML = '<div class="badge">2</div><div class="title">Сканируйте баркод товара</div><div class="sub">Баркод с этикетки WB, потом КИЗ этого товара' + boxNote + ". Для другого короба отсканируйте его QR.</div>";
@@ -667,11 +696,12 @@ body { margin: 0; }
     // grouped by box: header row per box, then what is inside (article × quantity)
     const sum = fboSummary();
     const boxOrder = [...new Set(sum.map((r) => r.box))].sort((a, b) => boxNo(a) - boxNo(b));
-    $("fbosum").innerHTML = boxOrder.map((bx) => {
+    const editing = document.activeElement && document.activeElement.closest && document.activeElement.closest("#fbosum [data-boxnum]");
+    if (!editing) $("fbosum").innerHTML = boxOrder.map((bx) => {
       const rows = sum.filter((r) => r.box === bx).sort((a, b) => String(a.article || a.barcode).localeCompare(String(b.article || b.barcode)));
       const total = rows.reduce((n, r) => n + r.n, 0);
       return '<tr class="boxrow' + (bx === fbo.box ? " cur" : "") + '"><td colspan="4"><b>' + esc(boxLabel(bx)) + "</b> · " + total + " шт." +
-        (bx === fbo.box ? ' <span class="chip ok">текущий</span>' : "") + (boxLabel(bx) !== bx ? ' <span class="file mono">' + esc(bx) + "</span>" : "") + "</td></tr>" +
+        (bx === fbo.box ? ' <span class="chip ok">текущий</span>' : "") + (/^\d{6,12}$/.test(bx) || /^WB_\d+$/.test(bx) ? "" : ' <label class="boxnum">№ на WB <input data-boxnum="' + esc(bx) + '" inputmode="numeric" placeholder="напр. 13744350" value="' + esc(boxWbNo(bx)) + '"' + (boxWbNo(bx) ? "" : ' class="need"') + "></label>") + "</td></tr>" +
         rows.map((r) => '<tr class="' + (bx === fbo.box && r.barcode && r.barcode === fbo.expect ? "curbox" : "") + '"><td><b>' + esc(r.article || "артикул ?") + '</b></td><td class="num qty">' + r.n + ' шт.</td><td class="num">' + (r.barcode ? esc(r.barcode) : '<span class="chip wait">неизвестен</span>') + '</td><td class="name">' + esc(r.name) + "</td></tr>").join("");
     }).join("") || '<tr><td colspan="4" class="file">Пока пусто</td></tr>';
     $("fbocount").textContent = fbo.items.length;
@@ -691,6 +721,14 @@ body { margin: 0; }
     saveFbo(); render();
     if (it) note("warn", "КИЗ удалён (" + boxLabel(it.box) + ").");
   });
+  $("fbosum").addEventListener("change", (e) => {
+    const i = e.target.closest("[data-boxnum]");
+    if (!i) return;
+    const n = i.value.replace(/\D/g, "");
+    setBoxNum(i.dataset.boxnum, n); render();
+    if (n) note("ok", "Номер короба " + n + " сохранён.");
+  });
+  $("fbosum").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.closest("[data-boxnum]")) { e.stopPropagation(); e.target.blur(); } });
   $("fbounknown").addEventListener("click", (e) => {
     const b = e.target.closest("[data-usave]");
     if (!b) return;
@@ -766,8 +804,10 @@ body { margin: 0; }
     const miss = rows.filter((r) => !r.barcode);
     if (miss.length) return fail("Не для всех товаров известен баркод WB (" + miss.length + " поз.). Заполните их в жёлтом блоке выше или отсканируйте баркод с этикетки, затем КИЗ.");
     // exactly the WB template "ШК коробов": 5 columns, sheet "Sheet1"
+    const noNum = [...new Set(rows.map((r) => r.box))].filter((b) => !boxWbNo(b));
+    if (noNum.length) return fail("Впишите номер короба, как в кабинете WB (например 13744350): " + noNum.map(boxLabel).join(", ") + ". Поле «№ на WB» — в списке ниже, или отсканируйте/введите номер сразу после QR короба.");
     const aoa = [["Баркод товара", "Кол-во товаров", "ШК короба", "Срок годности", "ШК короба для печати в стороннем сервисе"]];
-    rows.sort((a, b) => boxNo(a.box) - boxNo(b.box)).forEach((r) => aoa.push([String(r.barcode), r.n, r.box, null, null]));
+    rows.sort((a, b) => boxNo(a.box) - boxNo(b.box)).forEach((r) => aoa.push([String(r.barcode), r.n, String(boxWbNo(r.box)), null, null]));
     fboSave("Короба FBO " + stamp() + ".xlsx", aoa, "Sheet1", [18, 16, 30, 16, 40]);
   });
   $("fbogoods").addEventListener("click", () => {
@@ -1655,7 +1695,7 @@ body { margin: 0; }
       v: 1,
       fbs: state.demo ? null : { fileId: state.fileId, fileT: state.fileT || 1, fileName: state.fileName, b64: state.b64, kiz },
       fbo: { epoch: fbo.epoch, del: fbo.del, items: fbo.items.map((it) => ({ kiz: it.kiz, box: it.box, gtin: it.gtin, barcode: it.barcode || "", t: it.t || 1 })) },
-      gtin: gtinMap, bc: bcMap, req
+      gtin: gtinMap, bc: bcMap, boxnum: boxNumMap, req
     };
   }
   function mergeRemote(R) {
@@ -1694,6 +1734,7 @@ body { margin: 0; }
       // directories: keep local entries, take what is missing
       Object.keys(R.gtin || {}).forEach((g) => { gtinMap[g] = Object.assign({}, R.gtin[g], gtinMap[g] || {}); });
       Object.keys(R.bc || {}).forEach((b) => { if (!bcMap[b]) bcMap[b] = R.bc[b]; });
+      Object.keys(R.boxnum || {}).forEach((b) => { if ((R.boxnum[b].t || 0) > ((boxNumMap[b] || {}).t || 0)) boxNumMap[b] = R.boxnum[b]; });
       // requisites: newer wins
       let lr = {};
       try { lr = JSON.parse(localStorage.getItem(REQ_STORE) || "{}"); } catch (e) {}
