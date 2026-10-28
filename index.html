@@ -346,8 +346,9 @@ body { margin: 0; }
         <div class="file" id="fbostat"></div>
       </div>
       <div class="gbtns">
-        <button type="button" id="fbolist" class="primary">Скачать Баркод – КИЗ (xlsx)</button>
-        <button type="button" id="fbobox" hidden>Скачать файл коробов для WB</button>
+        <button type="button" id="fbogoods" class="primary">Товары для WB</button>
+        <button type="button" id="fbobox" class="primary" hidden>Короба для WB</button>
+        <button type="button" id="fbolist">КИЗ для УПД (xlsx)</button>
         <button type="button" id="fbocards" hidden>Загрузить карточки WB</button>
         <input type="file" id="fbocardsfile" class="vh" tabindex="-1" aria-hidden="true" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/octet-stream">
         <button type="button" id="fbonew">Новая поставка</button>
@@ -649,7 +650,7 @@ body { margin: 0; }
     $("fbobox").hidden = !usesBoxes;
 
     $("undo").disabled = !fbo.items.length;
-    $("fbobox").disabled = $("fbolist").disabled = !fbo.items.length;
+    $("fbobox").disabled = $("fbolist").disabled = $("fbogoods").disabled = !fbo.items.length;
     const step = $("step");
     const boxNote = fbo.box ? " · <b>" + esc(boxLabel(fbo.box)) + "</b> (" + fbo.items.filter((it) => it.box === fbo.box).length + " шт.)" : "";
     if (!fbo.box) {
@@ -748,7 +749,7 @@ body { margin: 0; }
     ws["!cols"] = widths.map((w) => ({ wch: w }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, sheet);
-    const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const out = XLSX.write(wb, { bookType: "xlsx", type: "array", bookSST: true });
     if (!downloads) return fail("Скачивание недоступно в этом окне.");
     try {
       await downloads.save({ filename, data: new Blob([out]) });
@@ -764,9 +765,21 @@ body { margin: 0; }
     if (!rows.length) return fail("Нет товаров, разложенных по коробам.");
     const miss = rows.filter((r) => !r.barcode);
     if (miss.length) return fail("Не для всех товаров известен баркод WB (" + miss.length + " поз.). Заполните их в жёлтом блоке выше или отсканируйте баркод с этикетки, затем КИЗ.");
-    const aoa = [["Баркод товара", "Кол-во товаров", "ШК короба", "Короб №"]];
-    rows.forEach((r) => aoa.push([r.barcode, r.n, r.box, boxNo(r.box)]));
-    fboSave("Короба FBO " + stamp() + ".xlsx", aoa, "Короба", [18, 16, 30, 10]);
+    // exactly the WB template "ШК коробов": 5 columns, sheet "Sheet1"
+    const aoa = [["Баркод товара", "Кол-во товаров", "ШК короба", "Срок годности", "ШК короба для печати в стороннем сервисе"]];
+    rows.sort((a, b) => boxNo(a.box) - boxNo(b.box)).forEach((r) => aoa.push([String(r.barcode), r.n, r.box, null, null]));
+    fboSave("Короба FBO " + stamp() + ".xlsx", aoa, "Sheet1", [18, 16, 30, 16, 40]);
+  });
+  $("fbogoods").addEventListener("click", () => {
+    // WB template for supply goods: "Баркод" | "Количество", one row per barcode, sheet "Sheet1"
+    const by = new Map();
+    let miss = 0;
+    fbo.items.forEach((it) => { const bc = itemBarcode(it); if (!bc) { miss++; return; } by.set(bc, (by.get(bc) || 0) + 1); });
+    if (miss) return fail("Не для всех товаров известен баркод WB (" + miss + " шт.). Заполните их в жёлтом блоке выше или отсканируйте баркод с этикетки, затем КИЗ.");
+    if (!by.size) return fail("Поставка пуста.");
+    const aoa = [["Баркод", "Количество"]];
+    [...by.entries()].sort((a, b) => String(articleOfBarcode(a[0]) || a[0]).localeCompare(String(articleOfBarcode(b[0]) || b[0]))).forEach(([bc, n]) => aoa.push([String(bc), n]));
+    fboSave("Товары FBO " + stamp() + ".xlsx", aoa, "Sheet1", [18, 12]);
   });
   $("fbolist").addEventListener("click", () => {
     const aoa = [["Баркод", "КИЗ", "Артикул продавца", "Наименование", "КИЗ (31 символ)", "ШК короба", "Короб №"]];
