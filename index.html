@@ -1727,6 +1727,19 @@ body { margin: 0; }
       headers: Object.assign({ Authorization: "Bearer " + syncCfg.token, Accept: "application/vnd.github+json" }, (opts && opts.headers) || {})
     }));
     if (res.status === 401) throw new Error("GitHub не принял токен. Проверьте, что он скопирован целиком и у него есть доступ к гистам (Gists).");
+    if (res.status === 403 || res.status === 429) {
+      // GitHub limits how often a gist may be changed; this is temporary, not a token problem
+      let body = "";
+      try { body = (await res.clone().json()).message || ""; } catch (e) {}
+      const ra = +res.headers.get("retry-after") || 0;
+      const reset = +res.headers.get("x-ratelimit-reset") || 0;
+      if (/rate limit|abuse/i.test(body) || ra || res.headers.get("x-ratelimit-remaining") === "0") {
+        const waitMs = Math.max(60000, ra * 1000, reset ? reset * 1000 - Date.now() : 0);
+        const e = new Error("GitHub временно ограничил частоту обновлений. Синхронизация продолжится сама примерно через " + Math.ceil(waitMs / 60000) + " мин. Сканировать можно дальше — всё сохраняется на устройстве.");
+        e.waitMs = waitMs;
+        throw e;
+      }
+    }
     if (res.status === 403 || res.status === 404) throw new Error("Нет доступа к гистам: у токена должно быть право «Gists: Read and write» (или галочка gist).");
     if (!res.ok) throw new Error("GitHub ответил " + res.status + ".");
     return res.json();
@@ -1819,10 +1832,13 @@ body { margin: 0; }
     if (!f) return null;
     let text = f.content;
     if (f.truncated && f.raw_url) text = await (await fetch(f.raw_url, { cache: "no-store" })).text();
-    try { return JSON.parse(text); } catch (e) { return null; }
+    try { return JSON.parse(text); } catch (e) { throw new Error("Не удалось прочитать данные синхронизации с GitHub, попробую ещё раз."); }
   }
-  async function syncNow() {
+  let lastPatch = 0, blockedUntil = 0;
+  const PATCH_GAP = 20000; // at most one upload every 20 s: GitHub limits how often content may be changed
+  async function syncNow(force) {
     if (!SYNC_OK || !syncCfg.token) return;
+    if (Date.now() < blockedUntil && force !== true) return;
     if (syncBusy) { syncAgain = true; return; }
     syncBusy = true;
     try {
@@ -1834,6 +1850,14 @@ body { margin: 0; }
       lastRemote = remoteText;
       const mine = JSON.stringify(localDoc());
       if (mine !== remoteText) {
+        const wait = PATCH_GAP - (Date.now() - lastPatch);
+        if (wait > 0) {
+          // too soon after the previous upload: send the changes a little later
+          clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, wait + 200);
+          syncStatus("wait", "отправка через " + Math.ceil(wait / 1000) + " с");
+          return;
+        }
+        lastPatch = Date.now();
         await gh("/gists/" + id, { method: "PATCH", body: JSON.stringify({ files: { [GIST_FILE]: { content: mine } } }) });
         lastRemote = mine;
       }
@@ -1842,7 +1866,11 @@ body { margin: 0; }
       syncStatus("ok", "синхронизировано " + String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0") + ":" + String(t.getSeconds()).padStart(2, "0"));
       $("syncinfo").textContent = "";
     } catch (err) {
-      syncStatus("err", navigator.onLine === false ? "нет интернета" : "ошибка");
+      if (err.waitMs) {
+        blockedUntil = Date.now() + err.waitMs;
+        clearTimeout(syncTimer); syncTimer = setTimeout(() => syncNow(true), err.waitMs + 1000);
+        syncStatus("wait", "пауза");
+      } else syncStatus("err", navigator.onLine === false ? "нет интернета" : "ошибка");
       $("syncinfo").textContent = err.message || String(err);
     } finally {
       syncBusy = false;
@@ -1852,7 +1880,7 @@ body { margin: 0; }
   function initSync() {
     if (!SYNC_OK) { $("syncbox").hidden = true; return; }
     if (syncCfg.token) { $("synctoken").value = "••••••••"; syncStatus("wait", "подключена"); syncNow(); }
-    setInterval(() => { if (syncCfg.token && !document.hidden) syncNow(); }, 8000);
+    setInterval(() => { if (syncCfg.token && !document.hidden) syncNow(); }, 15000);
     document.addEventListener("visibilitychange", () => { if (!document.hidden && syncCfg.token) syncNow(); });
     $("syncon").addEventListener("click", () => {
       const t = $("synctoken").value.trim();
@@ -1862,7 +1890,7 @@ body { margin: 0; }
       note("ok", "Синхронизация подключена. Сделайте то же на другом устройстве с этим же токеном.");
       syncNow();
     });
-    $("syncnow").addEventListener("click", () => { if (!syncCfg.token) return fail("Сначала подключите синхронизацию токеном."); syncNow(); });
+    $("syncnow").addEventListener("click", () => { if (!syncCfg.token) return fail("Сначала подключите синхронизацию токеном."); lastPatch = 0; syncNow(true); });
     $("syncoff").addEventListener("click", () => {
       syncCfg = { token: "", gist: "" }; saveSyncCfg();
       $("synctoken").value = ""; syncStatus("wait", "выключена"); $("syncinfo").textContent = "";
