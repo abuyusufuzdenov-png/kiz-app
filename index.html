@@ -662,6 +662,14 @@ body { margin: 0; }
     beep(true);
   }
   function fboUndo() {
+    // a box scanned by mistake (nothing put in it yet): undo returns to the previous box
+    if (fbo.box && !fbo.items.some((it) => it.box === fbo.box)) {
+      const wrong = fbo.box, prev = fbo.items.length ? fbo.items[fbo.items.length - 1].box : "";
+      fbo.box = prev; fbo.expect = "";
+      saveFbo(); render();
+      note("warn", "Отменён короб «" + wrong.slice(0, 30) + "». " + (prev ? "Текущий снова " + boxLabel(prev) + "." : "Сканируйте QR-код короба."));
+      return;
+    }
     const it = fbo.items.pop();
     if (!it) return;
     fbo.del[kizKey(it.kiz)] = Date.now();
@@ -692,7 +700,7 @@ body { margin: 0; }
     $("fbostat").textContent = "Отсканировано КИЗ: " + fbo.items.length + (fbo.box ? " · текущий: " + boxLabel(fbo.box) : "");
     $("fbobox").hidden = !usesBoxes;
 
-    $("undo").disabled = !fbo.items.length;
+    $("undo").disabled = !fbo.items.length && !fbo.box;
     $("fbobox").disabled = $("fbolist").disabled = $("fbogoods").disabled = !fbo.items.length;
     const step = $("step");
     const boxNote = fbo.box ? " · <b>" + esc(boxLabel(fbo.box)) + "</b> (" + fbo.items.filter((it) => it.box === fbo.box).length + " шт.)" : "";
@@ -717,8 +725,8 @@ body { margin: 0; }
     if (!editing) $("fbosum").innerHTML = boxOrder.map((bx) => {
       const rows = sum.filter((r) => r.box === bx).sort((a, b) => String(a.article || a.barcode).localeCompare(String(b.article || b.barcode)));
       const total = rows.reduce((n, r) => n + r.n, 0);
-      return '<tr class="boxrow' + (bx === fbo.box ? " cur" : "") + '"><td colspan="4"><b>' + esc(boxLabel(bx)) + "</b> · " + total + " шт." +
-        (bx === fbo.box ? ' <span class="chip ok">текущий</span>' : "") + (/^\d{6,12}$/.test(bx) || /^WB_\d+$/.test(bx) ? "" : ' <label class="boxnum">№ на WB <input data-boxnum="' + esc(bx) + '" inputmode="numeric" placeholder="напр. 13744350" value="' + esc(boxWbNo(bx)) + '"' + (boxWbNo(bx) ? "" : ' class="need"') + "></label>") + "</td></tr>" +
+      return '<tr class="boxrow' + (bx === fbo.box ? " cur" : "") + '" data-box="' + esc(bx) + '" title="Нажмите, чтобы сделать текущим"><td colspan="4"><b>' + esc(boxLabel(bx)) + "</b> · " + total + " шт." +
+        (bx === fbo.box ? ' <span class="chip ok">текущий</span>' : ' <span class="chip">сделать текущим</span>') + (/^\d{6,12}$/.test(bx) || /^WB_\d+$/.test(bx) ? "" : ' <label class="boxnum">№ на WB <input data-boxnum="' + esc(bx) + '" inputmode="numeric" placeholder="напр. 13744350" value="' + esc(boxWbNo(bx)) + '"' + (boxWbNo(bx) ? "" : ' class="need"') + "></label>") + "</td></tr>" +
         rows.map((r) => '<tr class="' + (bx === fbo.box && r.barcode && r.barcode === fbo.expect ? "curbox" : "") + '"><td><b>' + esc(r.article || "артикул ?") + '</b></td><td class="num qty">' + r.n + ' шт.</td><td class="num">' + (r.barcode ? esc(r.barcode) : '<span class="chip wait">неизвестен</span>') + '</td><td class="name">' + esc(r.name) + "</td></tr>").join("");
     }).join("") || '<tr><td colspan="4" class="file">Пока пусто</td></tr>';
     $("fbocount").textContent = fbo.items.length;
@@ -744,6 +752,17 @@ body { margin: 0; }
     fixBarcodeOwner(f.want, f.gtin);
     fbo.expect = f.want;
     addFboKiz(f.v);
+    scan.focus({ preventScroll: true });
+  });
+  $("fbosum").addEventListener("click", (e) => {
+    if (e.target.closest("input, label")) return;
+    const row = e.target.closest("tr.boxrow");
+    if (!row) return;
+    const bx = row.dataset.box;
+    if (!bx || bx === fbo.box) return;
+    fbo.box = bx; fbo.expect = "";
+    saveFbo(); render();
+    note("ok", "Текущий короб: " + boxLabel(bx) + ". Сканируйте баркод товара, затем КИЗ.");
     scan.focus({ preventScroll: true });
   });
   $("fbosum").addEventListener("change", (e) => {
