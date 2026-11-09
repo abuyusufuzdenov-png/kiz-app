@@ -158,7 +158,12 @@ body[data-mode="fbo"] .fbsonly, body[data-mode="fbs"] .fboonly { display: none !
 td.acts { white-space: nowrap; }
 td.acts .x + .x { margin-left: 4px; }
 td.acts .x.rm { font-size: 12px; color: var(--muted); }
-td.acts .x.rm.armed { color: #fff; background: var(--err); border-color: var(--err); }
+td.acts .x.rm.armed, td.acts .x.armed { color: #fff; background: var(--err); border-color: var(--err); }
+.boxdel { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; margin-left: 6px; }
+.boxdel.armed { color: #fff; background: var(--err); border-color: var(--err); }
+#fbodelmode.armed { color: #fff; background: var(--err); border-color: var(--err); }
+.step.err { background: var(--err-soft); border-left: 6px solid var(--err); }
+.step.err .badge { background: var(--err); }
 @media (max-width: 640px) { td.acts .x { font-size: 18px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); } td.acts .x + .x { margin-left: 10px; } }
 .boxnum { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); margin-left: 6px; }
 .boxnum input { font: inherit; font-family: var(--font-mono); width: 11ch; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
@@ -310,6 +315,7 @@ body { margin: 0; }
       <button type="button" id="pick" class="fbsonly">Загрузить файл</button>
       <input type="file" id="file" class="vh" tabindex="-1" aria-hidden="true" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/octet-stream">
       <button id="undo" type="button" disabled>Отменить последний</button>
+      <button id="fbodelmode" type="button" class="fboonly" disabled>Удалить КИЗ сканом</button>
       <button id="export" class="primary fbsonly" type="button" disabled>Скачать xlsx</button>
       <button id="share" type="button" class="fbsonly" hidden disabled>Отправить файл</button>
     </div>
@@ -584,8 +590,49 @@ body { margin: 0; }
     const g = Object.keys(gtinMap).find((k) => gtinMap[k].barcode === b);
     return g ? gtinMap[g].article : "";
   }
+  // ---------- FBO: deleting KIZ ----------
+  let fboDelMode = false, fboLastDel = null;
+  function setDelMode(on) {
+    fboDelMode = on;
+    $("fbodelmode").classList.toggle("armed", on);
+    $("fbodelmode").textContent = on ? "Отмена удаления" : "Удалить КИЗ сканом";
+    render();
+  }
+  function deleteFboItem(idx, how) {
+    const it = fbo.items.splice(idx, 1)[0];
+    if (!it) return;
+    fbo.del[kizKey(it.kiz)] = Date.now();
+    fboLastDel = { list: [{ it, idx }] };
+    saveFbo(); render();
+    const art = itemArticle(it) || itemBarcode(it) || "GTIN " + it.gtin;
+    note("warn", "КИЗ удалён" + how + ": " + art + " из " + boxLabel(it.box) + " (осталось в коробе " + fbo.items.filter((x) => x.box === it.box).length + " шт.). Вернуть — «Отменить последний».");
+    flash("info", "−", art, "удалён из " + boxLabel(it.box));
+    beep(true);
+  }
+  function deleteBox(bx) {
+    const list = [];
+    fbo.items.forEach((it, idx) => { if (it.box === bx) list.push({ it, idx }); });
+    const now = Date.now();
+    list.forEach(({ it }) => { fbo.del[kizKey(it.kiz)] = now; });
+    fbo.items = fbo.items.filter((it) => it.box !== bx);
+    const label = boxLabel(bx);
+    if (fbo.box === bx) { fbo.box = ""; fbo.expect = ""; }
+    fboLastDel = { list, box: bx };
+    saveFbo(); render();
+    note("warn", label + " удалён вместе с " + list.length + " КИЗ. Вернуть — «Отменить последний».");
+    flash("info", "−", label, "удалён, " + list.length + " КИЗ");
+    beep(true);
+  }
   function processFbo(v) {
     // in FBO a long QR (box label) must not be mistaken for a KIZ: KIZ always starts with 01 + GTIN + 21
+    if (fboDelMode) {
+      if (!/^01\d{14}21/.test(normKiz(v))) return fail("Режим удаления: сканируйте КИЗ товара, который надо убрать. Или нажмите «Отмена удаления».");
+      const key = kizKey(normKiz(v));
+      const idx = fbo.items.findIndex((it) => kizKey(it.kiz) === key);
+      fboDelMode = false; setDelMode(false);
+      if (idx < 0) return fail("Этого КИЗ нет в поставке — удалять нечего.");
+      return deleteFboItem(idx, " сканом");
+    }
     if (/^01\d{14}21/.test(normKiz(v))) return addFboKiz(v);
     const digits = v.replace(/\s/g, "");
     if (eanValid(digits) || (/^\d{8,14}$/.test(digits) && bcMap[digits])) {
@@ -657,7 +704,7 @@ body { margin: 0; }
       if (!g.barcode) { gtinMap[gtin] = Object.assign({}, g, { barcode: want, article: g.article || artWant || "" }); saveGtin(); }
       item.barcode = want;
     }
-    fbo.items.push(item);
+    fbo.items.push(item); fboLastDel = null;
     saveFbo(); render();
     const bc = itemBarcode(item), art = itemArticle(item);
     const same = fbo.items.filter((it) => itemBarcode(it) === bc).length;
@@ -674,6 +721,24 @@ body { margin: 0; }
       saveFbo(); render();
       note("warn", "Отменён короб «" + wrong.slice(0, 30) + "». " + (prev ? "Текущий снова " + boxLabel(prev) + "." : "Сканируйте QR-код короба."));
       return;
+    }
+    // the last action was a deletion: bring that KIZ back
+    if (fboLastDel) {
+      const d = fboLastDel;
+      fboLastDel = null;
+      const now = Date.now();
+      let n = 0;
+      d.list.slice().sort((a, b) => a.idx - b.idx).forEach(({ it, idx }) => {
+        if (fbo.items.some((x) => kizKey(x.kiz) === kizKey(it.kiz))) return;
+        it.t = now; delete fbo.del[kizKey(it.kiz)];
+        fbo.items.splice(Math.min(idx, fbo.items.length), 0, it); n++;
+      });
+      if (d.box) { fbo.box = d.box; fbo.expect = ""; }
+      if (n || d.box) {
+        saveFbo(); render();
+        note("warn", d.box ? "Отменено: " + boxLabel(d.box) + " возвращён (" + n + " КИЗ)." : "Отменено: КИЗ снова в " + boxLabel(d.list[0].it.box) + ".");
+        return;
+      }
     }
     const it = fbo.items.pop();
     if (!it) return;
@@ -705,11 +770,18 @@ body { margin: 0; }
     $("fbostat").textContent = "Отсканировано КИЗ: " + fbo.items.length + (fbo.box ? " · текущий: " + boxLabel(fbo.box) : "");
     $("fbobox").hidden = !usesBoxes;
 
-    $("undo").disabled = !fbo.items.length && !fbo.box;
+    $("undo").disabled = !fbo.items.length && !fbo.box && !fboLastDel;
+    $("fbodelmode").disabled = !fbo.items.length && !fboDelMode;
     $("fbobox").disabled = $("fbolist").disabled = $("fbogoods").disabled = !fbo.items.length;
     const step = $("step");
+    if (fboDelMode) {
+      step.className = "step err";
+      step.innerHTML = '<div class="badge">−</div><div class="title">Удаление: сканируйте КИЗ</div><div class="sub">Отсканируйте КИЗ товара, который надо убрать из поставки. После этого программа вернётся к обычной работе.</div>';
+    }
     const boxNote = fbo.box ? " · <b>" + esc(boxLabel(fbo.box)) + "</b> (" + fbo.items.filter((it) => it.box === fbo.box).length + " шт.)" : "";
-    if (!fbo.box) {
+    if (fboDelMode) {
+      // step already shows the deletion prompt
+    } else if (!fbo.box) {
       step.className = "step";
       step.innerHTML = '<div class="badge">1</div><div class="title">Сканируйте QR-код короба</div><div class="sub">Этикетка WB на коробе. Потом в этот короб: баркод товара → КИЗ.</div>';
     } else if (!boxWbNo(fbo.box) && !fbo.items.some((it) => it.box === fbo.box)) {
@@ -731,12 +803,12 @@ body { margin: 0; }
       const rows = sum.filter((r) => r.box === bx).sort((a, b) => String(a.article || a.barcode).localeCompare(String(b.article || b.barcode)));
       const total = rows.reduce((n, r) => n + r.n, 0);
       return '<tr class="boxrow' + (bx === fbo.box ? " cur" : "") + '" data-box="' + esc(bx) + '" title="Нажмите, чтобы сделать текущим"><td colspan="4"><b>' + esc(boxLabel(bx)) + "</b> · " + total + " шт." +
-        (bx === fbo.box ? ' <span class="chip ok">текущий</span>' : ' <span class="chip">сделать текущим</span>') + (/^\d{6,12}$/.test(bx) || /^WB_\d+$/.test(bx) ? "" : ' <label class="boxnum">№ на WB <input data-boxnum="' + esc(bx) + '" inputmode="numeric" placeholder="напр. 13744350" value="' + esc(boxWbNo(bx)) + '"' + (boxWbNo(bx) ? "" : ' class="need"') + "></label>") + "</td></tr>" +
+        (bx === fbo.box ? ' <span class="chip ok">текущий</span>' : ' <span class="chip">сделать текущим</span>') + ' <button type="button" class="x boxdel" data-boxdel="' + esc(bx) + '">Удалить короб</button>' + (/^\d{6,12}$/.test(bx) || /^WB_\d+$/.test(bx) ? "" : ' <label class="boxnum">№ на WB <input data-boxnum="' + esc(bx) + '" inputmode="numeric" placeholder="напр. 13744350" value="' + esc(boxWbNo(bx)) + '"' + (boxWbNo(bx) ? "" : ' class="need"') + "></label>") + "</td></tr>" +
         rows.map((r) => '<tr class="' + (bx === fbo.box && r.barcode && r.barcode === fbo.expect ? "curbox" : "") + '"><td><b>' + esc(r.article || "артикул ?") + '</b></td><td class="num qty">' + r.n + ' шт.</td><td class="num">' + (r.barcode ? esc(r.barcode) : '<span class="chip wait">неизвестен</span>') + '</td><td class="name">' + esc(r.name) + "</td></tr>").join("");
     }).join("") || '<tr><td colspan="4" class="file">Пока пусто</td></tr>';
     $("fbocount").textContent = fbo.items.length;
     $("fboitems").innerHTML = fbo.items.map((it, i) =>
-      '<tr><td class="num">' + esc(itemBarcode(it) || "—") + "</td><td>" + esc(itemArticle(it) || "GTIN " + it.gtin) + '</td><td title="' + esc(it.box) + '">' + esc(boxLabel(it.box)) + '</td><td class="kizcell">' + kizHtml(it.kiz) + '</td><td><button class="x" type="button" data-fdel="' + i + '" aria-label="Удалить КИЗ">×</button></td></tr>').reverse().join("");
+      '<tr><td class="num">' + esc(itemBarcode(it) || "—") + "</td><td>" + esc(itemArticle(it) || "GTIN " + it.gtin) + '</td><td title="' + esc(it.box) + '">' + esc(boxLabel(it.box)) + '</td><td class="kizcell">' + kizHtml(it.kiz) + '</td><td class="acts"><button class="x" type="button" data-fdel="' + i + '" aria-label="Удалить КИЗ">×</button></td></tr>').reverse().join("");
     const need = [...new Set(fbo.items.filter((it) => !itemBarcode(it) || !itemArticle(it)).map((it) => it.gtin))];
     $("fbounknown").innerHTML = need.length ? '<div class="unk"><b>Впишите артикул для этих товаров (нужен для УПД, вписывается один раз)</b>' +
       need.map((g) => { const i = gtinMap[g] || {}; return '<div class="row"><span class="mono">GTIN ' + esc(g) + '</span><input data-ug="' + g + '" data-uf="barcode" inputmode="numeric" placeholder="Баркод WB с этикетки" value="' + esc(wbBarcode(g)) + '"><input data-ug="' + g + '" data-uf="article" placeholder="Артикул продавца" value="' + esc(i.article || "") + '"><button type="button" data-usave="' + g + '">Сохранить</button></div>'; }).join("") +
@@ -746,10 +818,12 @@ body { margin: 0; }
   $("fboitems").addEventListener("click", (e) => {
     const b = e.target.closest("[data-fdel]");
     if (!b) return;
-    const it = fbo.items.splice(+b.dataset.fdel, 1)[0];
-    if (it) fbo.del[kizKey(it.kiz)] = Date.now();
-    saveFbo(); render();
-    if (it) note("warn", "КИЗ удалён (" + boxLabel(it.box) + ").");
+    if (!b.dataset.armed) {
+      b.dataset.armed = "1"; b.classList.add("armed"); b.textContent = "Удалить?";
+      setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.classList.remove("armed"); b.textContent = "×"; } }, 3000);
+      return;
+    }
+    deleteFboItem(+b.dataset.fdel, "");
   });
   $("msg").addEventListener("click", (e) => {
     if (!e.target.closest("#fbofix") || !fboFix) return;
@@ -761,6 +835,17 @@ body { margin: 0; }
   });
   $("fbosum").addEventListener("click", (e) => {
     if (e.target.closest("input, label")) return;
+    const bd = e.target.closest("[data-boxdel]");
+    if (bd) {
+      if (!bd.dataset.armed) {
+        bd.dataset.armed = "1"; bd.classList.add("armed"); bd.textContent = "Точно удалить короб?";
+        setTimeout(() => { if (bd.isConnected) { delete bd.dataset.armed; bd.classList.remove("armed"); bd.textContent = "Удалить короб"; } }, 3000);
+        return;
+      }
+      deleteBox(bd.dataset.boxdel);
+      scan.focus({ preventScroll: true });
+      return;
+    }
     const row = e.target.closest("tr.boxrow");
     if (!row) return;
     const bx = row.dataset.box;
@@ -1706,6 +1791,7 @@ body { margin: 0; }
   applyKbd();
   $("nokbd").addEventListener("change", () => { applyKbd(); scan.blur(); setTimeout(() => scan.focus(), 50); });
   $("undo").addEventListener("click", () => (mode === "fbo" ? fboUndo() : undo()));
+  $("fbodelmode").addEventListener("click", () => { setDelMode(!fboDelMode); scan.focus({ preventScroll: true }); });
   $("soundtest").addEventListener("click", () => { beep(true); setTimeout(() => beep(false), 700); scan.focus({ preventScroll: true }); });
 
   // ---------- export ----------
