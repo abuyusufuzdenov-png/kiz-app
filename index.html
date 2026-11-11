@@ -504,6 +504,7 @@ body { margin: 0; }
   let mode = "fbs";
   try { if (localStorage.getItem("kiz-mode") === "fbo") mode = "fbo"; } catch (e) {}
   function setMode(m) {
+    if (typeof fboDelMode !== "undefined" && fboDelMode && m !== "fbo") { fboDelMode = false; $("fbodelmode").classList.remove("armed"); $("fbodelmode").textContent = "Удалить КИЗ сканом"; }
     mode = m;
     try { localStorage.setItem("kiz-mode", m); } catch (e) {}
     hideMsg(); render();
@@ -595,11 +596,13 @@ body { margin: 0; }
     return g ? gtinMap[g].article : "";
   }
   // ---------- FBO: deleting KIZ ----------
-  let fboDelMode = false, fboLastDel = null;
+  let fboDelMode = false, fboLastDel = null, fboDelCount = 0;
   function setDelMode(on) {
     fboDelMode = on;
+    if (on) fboDelCount = 0;
     $("fbodelmode").classList.toggle("armed", on);
-    $("fbodelmode").textContent = on ? "Отмена удаления" : "Удалить КИЗ сканом";
+    $("fbodelmode").textContent = on ? "Выключить удаление" : "Удалить КИЗ сканом";
+    if (!on) note("ok", "Режим удаления выключен" + (fboDelCount ? " (удалено " + fboDelCount + " шт.)" : "") + ". Сканирование работает как обычно.");
     render();
   }
   function deleteFboItem(idx, how) {
@@ -611,7 +614,7 @@ body { margin: 0; }
     const art = itemArticle(it) || itemBarcode(it) || "GTIN " + it.gtin;
     note("warn", "КИЗ удалён" + how + ": " + art + " из " + boxLabel(it.box) + " (осталось в коробе " + fbo.items.filter((x) => x.box === it.box).length + " шт.). Вернуть — «Отменить последний».");
     flash("info", "−", art, "удалён из " + boxLabel(it.box));
-    beep(true);
+    beep("del");
   }
   function deleteBox(bx) {
     const list = [];
@@ -625,17 +628,19 @@ body { margin: 0; }
     saveFbo(); render();
     note("warn", label + " удалён вместе с " + list.length + " КИЗ. Вернуть — «Отменить последний».");
     flash("info", "−", label, "удалён, " + list.length + " КИЗ");
-    beep(true);
+    beep("del");
   }
   function processFbo(v) {
     // in FBO a long QR (box label) must not be mistaken for a KIZ: KIZ always starts with 01 + GTIN + 21
     if (fboDelMode) {
       if (!/^01\d{14}21/.test(normKiz(v))) return fail("Режим удаления: сканируйте КИЗ товара, который надо убрать. Или нажмите «Отмена удаления».");
+      // the mode stays on until switched off: scan as many KIZ to delete as needed
       const key = kizKey(normKiz(v));
       const idx = fbo.items.findIndex((it) => kizKey(it.kiz) === key);
-      fboDelMode = false; setDelMode(false);
-      if (idx < 0) return fail("Этого КИЗ нет в поставке — удалять нечего.");
-      return deleteFboItem(idx, " сканом");
+      if (idx < 0) return fail("Этого КИЗ нет в поставке — удалять нечего. Режим удаления включён.");
+      fboDelCount++;
+      deleteFboItem(idx, " сканом");
+      return;
     }
     if (/^01\d{14}21/.test(normKiz(v))) return addFboKiz(v);
     const digits = v.replace(/\s/g, "");
@@ -645,14 +650,14 @@ body { margin: 0; }
       const a = articleOfBarcode(digits);
       note("ok", "Баркод " + digits + (a ? " (" + a + ")" : "") + ". Теперь сканируйте КИЗ этого товара.");
       flash("info", "→", a || digits, "Теперь КИЗ");
-      beep(true); render(); return;
+      beep("barcode"); render(); return;
     }
     // a plain number while the current box (QR "$Ts;…") has no number yet → that is its number in the WB cabinet
     if (fbo.box && /^\d{6,10}$/.test(digits) && !boxWbNo(fbo.box) && !/^\d{6,12}$/.test(fbo.box)) {
       setBoxNum(fbo.box, digits); render();
       note("ok", "Номер короба " + digits + " записан. Теперь сканируйте баркод товара, затем его КИЗ.");
       flash("info", "▣", "Короб " + digits, "номер записан");
-      beep(true); return;
+      beep("box"); return;
     }
     // anything else is a box label (QR of the WB box sticker)
     const box = boxId(v);
@@ -663,7 +668,7 @@ body { margin: 0; }
     const n = fbo.items.filter((it) => it.box === fbo.box).length;
     note("ok", boxLabel(fbo.box).replace(/^(\d)/, "Короб $1") + (n ? " (в нём уже " + n + " шт.)" : "") + " — QR: " + fbo.box + ". Теперь сканируйте баркод товара, затем его КИЗ.");
     flash("info", "▣", boxLabel(fbo.box).replace(/^(\d)/, "Короб $1"), n ? "в нём уже " + n + " шт." : "Новый короб");
-    beep(true);
+    beep("box");
   }
   let fboFix = null;
   // the user confirmed (e.g. in the WB card) that barcode `bc` belongs to the article of this KIZ's GTIN: fix the directory
@@ -713,9 +718,12 @@ body { margin: 0; }
     const bc = itemBarcode(item), art = itemArticle(item);
     const same = fbo.items.filter((it) => itemBarcode(it) === bc).length;
     const inBox = fbo.items.filter((it) => it.box === item.box).length;
-    flash("ok", "✓", art || bc, boxLabel(item.box) + " · " + inBox + " шт.");
-    note("ok", "КИЗ записан: баркод " + bc + (art ? " (" + art + ")" : "") + " → " + boxLabel(item.box) + " (в коробе " + inBox + " шт., всего " + fbo.items.length + "). Следующий: баркод, затем КИЗ.");
-    beep(true);
+    const total = fbo.items.length;
+    const hundred = inBox % 100 === 0 ? "В коробе " + inBox + " шт.!" : total % 100 === 0 ? "Всего " + total + " шт.!" : "";
+    if (hundred) flash("ok", "★", hundred, boxLabel(item.box));
+    else flash("ok", "✓", art || bc, boxLabel(item.box) + " · " + inBox + " шт.");
+    note("ok", "КИЗ записан: баркод " + bc + (art ? " (" + art + ")" : "") + " → " + boxLabel(item.box) + " (в коробе " + inBox + " шт., всего " + total + "). " + (hundred ? hundred + " " : "") + "Следующий: баркод, затем КИЗ.");
+    beep(hundred ? "hundred" : "kiz");
   }
   function fboUndo() {
     // a box scanned by mistake (nothing put in it yet): undo returns to the previous box
@@ -780,7 +788,7 @@ body { margin: 0; }
     const step = $("step");
     if (fboDelMode) {
       step.className = "step err";
-      step.innerHTML = '<div class="badge">−</div><div class="title">Удаление: сканируйте КИЗ</div><div class="sub">Отсканируйте КИЗ товара, который надо убрать из поставки. После этого программа вернётся к обычной работе.</div>';
+      step.innerHTML = '<div class="badge">−</div><div class="title">Режим удаления' + (fboDelCount ? ": удалено " + fboDelCount + " шт." : "") + '</div><div class="sub">Каждый отсканированный КИЗ удаляется из поставки. Закончили — нажмите «Выключить удаление».</div>';
     }
     const boxNote = fbo.box ? " · <b>" + esc(boxLabel(fbo.box)) + "</b> (" + fbo.items.filter((it) => it.box === fbo.box).length + " шт.)" : "";
     if (fboDelMode) {
@@ -1259,7 +1267,7 @@ body { margin: 0; }
     if (tr) tr.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     if (row.kiz) note("warn", "У задания " + rowLabel(row) + " уже есть КИЗ. Новый скан КИЗ заменит его.");
     else hideMsg();
-    if (fromScan) { beep(true); flash("info", "→", row.article || "Задание " + row.order, "Теперь КИЗ"); }
+    if (fromScan) { beep("barcode"); flash("info", "→", row.article || "Задание " + row.order, "Теперь КИЗ"); }
     scan.focus({ preventScroll: true });
   }
 
@@ -1287,10 +1295,13 @@ body { margin: 0; }
     const tr = document.querySelector('tr[data-i="' + i + '"]');
     if (tr) { tr.classList.remove("flash"); void tr.offsetWidth; tr.classList.add("flash"); }
     const left = state.rows.filter((r) => !r.kiz).length;
-    flash("ok", "✓", row.article || rowLabel(row), left ? "Осталось " + left : "Все задания собраны");
+    const doneN = state.rows.length - left;
+    const hundredS = !replaced && doneN % 100 === 0;
+    if (hundredS) flash("ok", "★", "Собрано " + doneN + " шт.!", left ? "Осталось " + left : "Все задания собраны");
+    else flash("ok", "✓", row.article || rowLabel(row), left ? "Осталось " + left : "Все задания собраны");
     note("ok", (replaced ? "КИЗ заменён: " : "КИЗ записан: ") + rowLabel(row) + ", " + (row.article || "") +
       (left ? ". Осталось " + left + ". Сканируйте следующий стикер." : ". Все задания заполнены, можно скачивать файл."));
-    beep(true);
+    beep(hundredS ? "hundred" : "kiz");
   }
 
   // edit: the task becomes selected and its current code goes into the scan field —
@@ -1371,9 +1382,12 @@ body { margin: 0; }
     flashTimer = setTimeout(() => { f.classList.remove("show"); }, kind === "err" ? 1400 : kind === "ok" ? 650 : 500);
   }
   let ac = null;
-  function beep(ok) {
+  // kinds: true / "kiz" — KIZ saved; false — error; "box" — box; "barcode" — barcode; "del" — deleted; "hundred" — every 100 pcs
+  function beep(kind) {
+    const ok = kind !== false;
     // vibration helps in a noisy warehouse (phones only)
-    try { if (navigator.vibrate) navigator.vibrate(ok ? 80 : [250, 100, 250, 100, 250]); } catch (e) {}
+    const vib = { box: [60, 60, 60], hundred: [120, 80, 120, 80, 300], del: [40, 60, 40] }[kind] || (ok ? 80 : [250, 100, 250, 100, 250]);
+    try { if (navigator.vibrate) navigator.vibrate(vib); } catch (e) {}
     if (!$("sound").checked) return;
     try {
       ac = ac || new (window.AudioContext || window.webkitAudioContext)();
@@ -1393,8 +1407,24 @@ body { margin: 0; }
         g.gain.linearRampToValueAtTime(0.0001, at + d);
         o.connect(g); g.connect(comp); o.start(at); o.stop(at + d + 0.02);
       };
-      if (ok) {
-        // success: two sharp high beeps, like a store scanner
+      if (kind === "box") {
+        // new box: rising three-note chime, lower and softer than a scan
+        tone(660, 0, 0.12, "triangle");
+        tone(880, 0.14, 0.12, "triangle");
+        tone(1320, 0.28, 0.22, "triangle");
+      } else if (kind === "barcode") {
+        // barcode: one short middle beep — "now the KIZ"
+        tone(1500, 0, 0.1, "square");
+      } else if (kind === "del") {
+        // deleted: falling two tones
+        tone(1400, 0, 0.1, "square");
+        tone(700, 0.13, 0.16, "square");
+      } else if (kind === "hundred") {
+        // every 100 pcs: short fanfare
+        [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.13, 0.12, "square"));
+        tone(1568, 0.55, 0.45, "square");
+      } else if (ok) {
+        // KIZ saved: two sharp high beeps, like a store scanner
         tone(2400, 0, 0.09, "square");
         tone(2400, 0.13, 0.09, "square");
       } else {
@@ -1810,7 +1840,11 @@ body { margin: 0; }
   $("undo").addEventListener("click", () => (mode === "fbo" ? fboUndo() : undo()));
   $("removedbox").addEventListener("click", (e) => { const b = e.target.closest("[data-restore]"); if (b) restoreTask(+b.dataset.restore); });
   $("fbodelmode").addEventListener("click", () => { setDelMode(!fboDelMode); scan.focus({ preventScroll: true }); });
-  $("soundtest").addEventListener("click", () => { beep(true); setTimeout(() => beep(false), 700); scan.focus({ preventScroll: true }); });
+  $("soundtest").addEventListener("click", () => {
+    // short demo of every sound: box, barcode, KIZ, deletion, 100 pcs, error
+    ["box", "barcode", "kiz", "del", "hundred", false].forEach((k, i) => setTimeout(() => beep(k), i * 1100));
+    scan.focus({ preventScroll: true });
+  });
 
   // ---------- export ----------
   const downloads = {
