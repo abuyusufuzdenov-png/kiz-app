@@ -1296,12 +1296,13 @@ body { margin: 0; }
     if (tr) { tr.classList.remove("flash"); void tr.offsetWidth; tr.classList.add("flash"); }
     const left = state.rows.filter((r) => !r.kiz).length;
     const doneN = state.rows.length - left;
+    const completed = !replaced && left === 0;
     const hundredS = !replaced && doneN % 100 === 0;
     if (hundredS) flash("ok", "★", "Собрано " + doneN + " шт.!", left ? "Осталось " + left : "Все задания собраны");
     else flash("ok", "✓", row.article || rowLabel(row), left ? "Осталось " + left : "Все задания собраны");
     note("ok", (replaced ? "КИЗ заменён: " : "КИЗ записан: ") + rowLabel(row) + ", " + (row.article || "") +
       (left ? ". Осталось " + left + ". Сканируйте следующий стикер." : ". Все задания заполнены, можно скачивать файл."));
-    beep(hundredS ? "hundred" : "kiz");
+    beep(completed ? "complete" : hundredS ? "hundred" : "kiz");
   }
 
   // edit: the task becomes selected and its current code goes into the scan field —
@@ -1382,11 +1383,11 @@ body { margin: 0; }
     flashTimer = setTimeout(() => { f.classList.remove("show"); }, kind === "err" ? 1400 : kind === "ok" ? 650 : 500);
   }
   let ac = null;
-  // kinds: true / "kiz" — KIZ saved; false — error; "box" — box; "barcode" — barcode; "del" — deleted; "hundred" — every 100 pcs
+  // kinds: true / "kiz" — KIZ saved; false — error; "box" — box; "barcode" — barcode; "del" — deleted; "hundred" — every 100 pcs; "complete" — all FBS orders packed
   function beep(kind) {
     const ok = kind !== false;
     // vibration helps in a noisy warehouse (phones only)
-    const vib = { box: [60, 60, 60], hundred: [120, 80, 120, 80, 300], del: [40, 60, 40] }[kind] || (ok ? 80 : [250, 100, 250, 100, 250]);
+    const vib = { box: [60, 60, 60], hundred: [120, 80, 120, 80, 300], complete: [120, 80, 120, 80, 400], del: [40, 60, 40] }[kind] || (ok ? 80 : [250, 100, 250, 100, 250]);
     try { if (navigator.vibrate) navigator.vibrate(vib); } catch (e) {}
     if (!$("sound").checked) return;
     try {
@@ -1419,6 +1420,11 @@ body { margin: 0; }
         // deleted: falling two tones
         tone(1400, 0, 0.1, "square");
         tone(700, 0.13, 0.16, "square");
+      } else if (kind === "complete") {
+        // all FBS orders packed: ascending melody with a sustained final chord
+        [659, 784, 1047, 1319].forEach((f, i) => tone(f, i * 0.18, 0.16, "triangle"));
+        tone(1047, 0.8, 0.6, "triangle");
+        tone(1319, 0.8, 0.6, "triangle");
       } else if (kind === "hundred") {
         // every 100 pcs: short fanfare
         [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.13, 0.12, "square"));
@@ -1841,8 +1847,8 @@ body { margin: 0; }
   $("removedbox").addEventListener("click", (e) => { const b = e.target.closest("[data-restore]"); if (b) restoreTask(+b.dataset.restore); });
   $("fbodelmode").addEventListener("click", () => { setDelMode(!fboDelMode); scan.focus({ preventScroll: true }); });
   $("soundtest").addEventListener("click", () => {
-    // short demo of every sound: box, barcode, KIZ, deletion, 100 pcs, error
-    ["box", "barcode", "kiz", "del", "hundred", false].forEach((k, i) => setTimeout(() => beep(k), i * 1100));
+    // short demo of every sound: box, barcode, KIZ, deletion, 100 pcs, FBS complete, error
+    ["box", "barcode", "kiz", "del", "hundred", "complete", false].forEach((k, i) => setTimeout(() => beep(k), i * 1600));
     scan.focus({ preventScroll: true });
   });
 
