@@ -207,6 +207,21 @@ button.danger { background: var(--err); border-color: var(--err); color: var(--p
   .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .actions .progress { grid-column: 1 / -1; }
   .actions button { font-size: 13px; padding: 8px 6px; justify-content: center; }
+  body[data-mode="fbo"] .actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    reading-flow: grid-rows;
+    gap: 8px;
+  }
+  body[data-mode="fbo"] .actions button { min-width: 0; min-height: 44px; }
+  #fbomove {
+    grid-area: 1 / 1 / 2 / -1;
+    gap: 8px;
+    font-size: 14px;
+    background: var(--accent-soft);
+  }
+  #fbomove::before { content: "⇄" / ""; font-size: 20px; line-height: 1; }
+  #fbomove[aria-pressed="true"] { background: var(--accent); color: var(--panel); }
   .station { padding: 10px; gap: 8px; border-radius: 10px; }
   .scanrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
   #scan { flex: none; width: 100%; font-size: 15px; padding: 10px 12px; }
