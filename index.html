@@ -178,6 +178,10 @@ td.acts .x.rm.armed, td.acts .x.armed { color: #fff; background: var(--err); bor
 }
 .fbo tr.boxrow.cur td { background: var(--sel); }
 .fbodetails summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+#fbomovepicker { display: grid; gap: 4px; min-width: 0; font-weight: 600; }
+#fbomovebox { width: 100%; min-width: 0; padding: 8px; }
+#fbo.moving .boxdel, #fbo.moving .boxrow .chip, #fbo.moving .boxnum { display: none; }
+#fbo.moving .boxrow { cursor: default; }
 .unk { border: 1px solid var(--warn); background: var(--warn-soft); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; }
 .unk .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .unk input { font: inherit; font-size: 14px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); min-width: 0; flex: 1 1 140px; }
@@ -318,6 +322,7 @@ body { margin: 0; }
       <button type="button" id="pick" class="fbsonly">Загрузить файл</button>
       <input type="file" id="file" class="vh" tabindex="-1" aria-hidden="true" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/octet-stream">
       <button id="undo" type="button" disabled>Отменить последний</button>
+      <button id="fbomove" type="button" class="fboonly" aria-pressed="false" disabled>Перенос между коробами</button>
       <button id="fbodelmode" type="button" class="fboonly" disabled>Удалить КИЗ сканом</button>
       <button id="export" class="primary fbsonly" type="button" disabled>Скачать xlsx</button>
       <button id="share" type="button" class="fbsonly" hidden disabled>Отправить файл</button>
@@ -337,6 +342,9 @@ body { margin: 0; }
     <button type="button" class="focushint" id="focushint" hidden>Сканер сейчас не попадает на страницу. Нажмите сюда, затем сканируйте.</button>
     <div class="lastscan" id="lastscan" hidden></div>
     <div class="step" id="step"></div>
+    <label id="fbomovepicker" class="fboonly" hidden>Короб назначения
+      <select id="fbomovebox"></select>
+    </label>
     <div class="msg" id="msg" hidden></div>
     <details class="optsbox" id="optsbox">
     <summary>Настройки</summary>
@@ -504,6 +512,7 @@ body { margin: 0; }
   let mode = "fbs";
   try { if (localStorage.getItem("kiz-mode") === "fbo") mode = "fbo"; } catch (e) {}
   function setMode(m) {
+    if (m !== "fbo") moveTarget = null;
     if (typeof fboDelMode !== "undefined" && fboDelMode && m !== "fbo") { fboDelMode = false; $("fbodelmode").classList.remove("armed"); $("fbodelmode").textContent = "Удалить КИЗ сканом"; }
     mode = m;
     try { localStorage.setItem("kiz-mode", m); } catch (e) {}
@@ -544,12 +553,24 @@ body { margin: 0; }
 
   // ---------- FBO state ----------
   const FBO_STORE = "kiz-fbo-v1";
-  let fbo = { items: [], box: "", expect: "", del: {}, epoch: 0 };
+  function emptyFbo(epoch) {
+    return { items: [], box: "", expect: "", del: {}, epoch, boxOrder: [], lastMove: null };
+  }
+  let fbo = emptyFbo(0);
   try { const f = JSON.parse(localStorage.getItem(FBO_STORE) || "null"); if (f && Array.isArray(f.items)) fbo = Object.assign(fbo, f); } catch (e) {}
   fbo.del = fbo.del || {}; fbo.epoch = fbo.epoch || 0;
   fbo.items.forEach((it) => { if (!it.t) it.t = 1; });
+  // Keep box numbers stable even when the first or last item in a box moves.
+  function rememberBoxes() {
+    const seen = new Set(fbo.boxOrder);
+    for (const box of [...fbo.items.map((it) => it.box), fbo.box]) {
+      if (box && !seen.has(box)) { fbo.boxOrder.push(box); seen.add(box); }
+    }
+  }
+  rememberBoxes();
   function saveFbo() {
-    try { localStorage.setItem(FBO_STORE, JSON.stringify({ items: fbo.items, box: fbo.box, expect: fbo.expect, del: fbo.del, epoch: fbo.epoch })); } catch (e) {}
+    rememberBoxes();
+    try { localStorage.setItem(FBO_STORE, JSON.stringify(fbo)); } catch (e) {}
     scheduleSync();
   }
   function eanValid(d) {
@@ -569,10 +590,7 @@ body { margin: 0; }
   }
   // WB box QR holds an internal code (e.g. "$Ts;D39;..."), not the printed number; boxes are shown as "Короб 1, 2…"
   function boxNo(b) {
-    const order = [];
-    fbo.items.forEach((it) => { if (it.box && !order.includes(it.box)) order.push(it.box); });
-    if (fbo.box && !order.includes(fbo.box)) order.push(fbo.box);
-    return order.indexOf(b) + 1;
+    return fbo.boxOrder.indexOf(b) + 1;
   }
   function boxWbNo(b) {
     if (!b) return "";
@@ -588,13 +606,56 @@ body { margin: 0; }
   function boxLabel(b) {
     if (!b) return "—";
     const n = boxWbNo(b);
-    return n ? n : "Короб " + boxNo(b);
+    if (n) return n;
+    const index = boxNo(b);
+    return index ? "Короб " + index : b;
   }
   function articleOfBarcode(b) {
     if (bcMap[b]) return bcMap[b].article;
     const g = Object.keys(gtinMap).find((k) => gtinMap[k].barcode === b);
     return g ? gtinMap[g].article : "";
   }
+  // null = ordinary scanning, "" = choosing a destination, otherwise the destination QR.
+  let moveTarget = null;
+  function chooseMoveTarget(box) {
+    if (!box) return;
+    moveTarget = box;
+    hideMsg(); render(); beep("box");
+    scan.focus({ preventScroll: true });
+  }
+  function moveFboItem(key) {
+    const it = fbo.items.find((item) => kizKey(item.kiz) === key);
+    if (!it) return fail("Такого КИЗ нет в этой поставке. Проверьте этикетку товара.");
+    if (it.box === moveTarget) return fail("Этот товар уже в выбранном коробе.");
+    const from = it.box, fromLabel = boxLabel(from);
+    it.boxT = Math.max(Date.now(), (it.boxT || 0) + 1, it.t);
+    it.box = moveTarget;
+    fbo.lastMove = { key, from, to: it.box, boxT: it.boxT };
+    fboLastDel = null;
+    saveFbo(); render();
+    const route = fromLabel + " → " + boxLabel(it.box);
+    note("ok", "Перенесено: " + (itemArticle(it) || itemBarcode(it) || key) + " · " + route + ".");
+    flash("ok", "✓", "Перенесено", route); beep("kiz");
+  }
+  function scanFboMove(v) {
+    const code = normKiz(v);
+    const isMark = /^01\d{14}21/.test(code);
+    if (!moveTarget) {
+      const digits = v.replace(/\s/g, "");
+      if (isMark || eanValid(digits) || bcMap[digits]) return fail("Сначала выберите короб назначения или отсканируйте его QR.");
+      const id = boxId(v);
+      const box = fbo.boxOrder.includes(id) ? id : fbo.boxOrder.find((b) => b && boxWbNo(b) === id);
+      return chooseMoveTarget(box || id);
+    }
+    if (!isMark || (code.length !== 31 && code.length !== 83)) return fail("Для переноса отсканируйте полный КИЗ товара.");
+    moveFboItem(kizKey(code));
+  }
+  $("fbomove").addEventListener("click", () => {
+    moveTarget = moveTarget === null ? "" : null;
+    hideMsg(); render();
+    scan.focus({ preventScroll: true });
+  });
+  $("fbomovebox").addEventListener("change", (e) => chooseMoveTarget(e.target.value));
   // ---------- FBO: deleting KIZ ----------
   let fboDelMode = false, fboLastDel = null, fboDelCount = 0;
   function setDelMode(on) {
@@ -608,6 +669,7 @@ body { margin: 0; }
   function deleteFboItem(idx, how) {
     const it = fbo.items.splice(idx, 1)[0];
     if (!it) return;
+    fbo.lastMove = null;
     fbo.del[kizKey(it.kiz)] = Date.now();
     fboLastDel = { list: [{ it, idx }] };
     saveFbo(); render();
@@ -623,14 +685,18 @@ body { margin: 0; }
     list.forEach(({ it }) => { fbo.del[kizKey(it.kiz)] = now; });
     fbo.items = fbo.items.filter((it) => it.box !== bx);
     const label = boxLabel(bx);
+    const boxIndex = fbo.boxOrder.indexOf(bx);
+    if (boxIndex >= 0) fbo.boxOrder[boxIndex] = null;
+    fbo.lastMove = null;
     if (fbo.box === bx) { fbo.box = ""; fbo.expect = ""; }
-    fboLastDel = { list, box: bx };
+    fboLastDel = { list, box: bx, boxIndex };
     saveFbo(); render();
     note("warn", label + " удалён вместе с " + list.length + " КИЗ. Вернуть — «Отменить последний».");
     flash("info", "−", label, "удалён, " + list.length + " КИЗ");
     beep("del");
   }
   function processFbo(v) {
+    if (moveTarget !== null) return scanFboMove(v);
     // in FBO a long QR (box label) must not be mistaken for a KIZ: KIZ always starts with 01 + GTIN + 21
     if (fboDelMode) {
       if (!/^01\d{14}21/.test(normKiz(v))) return fail("Режим удаления: сканируйте КИЗ товара, который надо убрать. Или нажмите «Отмена удаления».");
@@ -663,6 +729,7 @@ body { margin: 0; }
     const box = boxId(v);
     if (!box) return fail("Код «" + v + "» не похож ни на короб, ни на баркод, ни на КИЗ.");
     fbo.box = box;
+    if (!fbo.items.some((it) => it.box === box)) fbo.lastMove = null;
     fbo.expect = "";
     saveFbo(); render();
     const n = fbo.items.filter((it) => it.box === fbo.box).length;
@@ -713,7 +780,7 @@ body { margin: 0; }
       if (!g.barcode) { gtinMap[gtin] = Object.assign({}, g, { barcode: want, article: g.article || artWant || "" }); saveGtin(); }
       item.barcode = want;
     }
-    fbo.items.push(item); fboLastDel = null;
+    fbo.items.push(item); fboLastDel = null; fbo.lastMove = null;
     saveFbo(); render();
     const bc = itemBarcode(item), art = itemArticle(item);
     const same = fbo.items.filter((it) => itemBarcode(it) === bc).length;
@@ -726,9 +793,24 @@ body { margin: 0; }
     beep(hundred ? "hundred" : "kiz");
   }
   function fboUndo() {
+    if (fbo.lastMove) {
+      const { key, from, to, boxT } = fbo.lastMove;
+      fbo.lastMove = null;
+      const it = fbo.items.find((item) => kizKey(item.kiz) === key);
+      if (!it || it.box !== to || it.boxT !== boxT) {
+        saveFbo(); render();
+        return fail("Данные этого КИЗ уже изменились. Проверьте короб в списке.");
+      }
+      it.box = from; it.boxT = Math.max(Date.now(), boxT + 1);
+      saveFbo(); render();
+      note("ok", "Перенос отменён. КИЗ возвращён в " + boxLabel(from) + ".");
+      return;
+    }
     // a box scanned by mistake (nothing put in it yet): undo returns to the previous box
     if (fbo.box && !fbo.items.some((it) => it.box === fbo.box)) {
       const wrong = fbo.box, prev = fbo.items.length ? fbo.items[fbo.items.length - 1].box : "";
+      const idx = fbo.boxOrder.indexOf(wrong);
+      if (idx >= 0) fbo.boxOrder[idx] = null;
       fbo.box = prev; fbo.expect = "";
       saveFbo(); render();
       note("warn", "Отменён короб «" + wrong.slice(0, 30) + "». " + (prev ? "Текущий снова " + boxLabel(prev) + "." : "Сканируйте QR-код короба."));
@@ -745,7 +827,10 @@ body { margin: 0; }
         it.t = now; delete fbo.del[kizKey(it.kiz)];
         fbo.items.splice(Math.min(idx, fbo.items.length), 0, it); n++;
       });
-      if (d.box) { fbo.box = d.box; fbo.expect = ""; }
+      if (d.box) {
+        if (d.boxIndex >= 0) fbo.boxOrder[d.boxIndex] = d.box;
+        fbo.box = d.box; fbo.expect = "";
+      }
       if (n || d.box) {
         saveFbo(); render();
         note("warn", d.box ? "Отменено: " + boxLabel(d.box) + " возвращён (" + n + " КИЗ)." : "Отменено: КИЗ снова в " + boxLabel(d.list[0].it.box) + ".");
@@ -769,30 +854,46 @@ body { margin: 0; }
     return [...map.values()];
   }
   function renderFbo() {
+    const displayBox = moveTarget === null ? fbo.box : moveTarget;
     {
-      const inBox = fbo.box ? fbo.items.filter((it) => it.box === fbo.box).length : 0;
+      const inBox = displayBox ? fbo.items.filter((it) => it.box === displayBox).length : 0;
       $("bigstat").hidden = false;
-      $("bigstat").innerHTML = '<div class="nums"><div><div class="big">' + inBox + '</div><div class="lbl">' + (fbo.box ? esc(boxLabel(fbo.box).replace(/^(\d)/, "Короб $1")) : "короб не выбран") + '</div></div>' +
+      $("bigstat").innerHTML = '<div class="nums"><div><div class="big">' + inBox + '</div><div class="lbl">' + (displayBox ? esc(boxLabel(displayBox).replace(/^(\d)/, "Короб $1")) : "короб не выбран") + '</div></div>' +
         '<div class="right"><div class="big done">' + fbo.items.length + '</div><div class="lbl">всего в поставке</div></div></div>';
     }
     $("title").textContent = "Поставка FBO: короба, баркоды, КИЗ";
     const boxes = [...new Set(fbo.items.map((it) => it.box))];
     $("fileinfo").textContent = fbo.items.length ? "КИЗ: " + fbo.items.length + (boxes.filter(Boolean).length ? " · коробов: " + boxes.filter(Boolean).length : "") : "Сканируйте QR-код первого короба";
     const usesBoxes = fbo.items.some((it) => it.box) || !!fbo.box;
-    $("fbostat").textContent = "Отсканировано КИЗ: " + fbo.items.length + (fbo.box ? " · текущий: " + boxLabel(fbo.box) : "");
+    $("fbostat").textContent = "Отсканировано КИЗ: " + fbo.items.length + (displayBox ? (moveTarget ? " · короб назначения: " : " · текущий: ") + boxLabel(displayBox) : "");
     $("fbobox").hidden = !usesBoxes;
 
-    $("undo").disabled = !fbo.items.length && !fbo.box && !fboLastDel;
-    $("fbodelmode").disabled = !fbo.items.length && !fboDelMode;
+    const moving = moveTarget !== null;
+    $("fbo").classList.toggle("moving", moving);
+    $("fbomove").disabled = fboDelMode || (!moving && !fbo.items.length);
+    $("fbomove").textContent = moving ? "Завершить перенос" : "Перенос между коробами";
+    $("fbomove").setAttribute("aria-pressed", String(moving));
+    $("fbomovepicker").hidden = moveTarget !== "";
+    if (moveTarget === "") {
+      $("fbomovebox").innerHTML = '<option value="">Выберите короб</option>' + fbo.boxOrder.filter(Boolean).map((box) =>
+        '<option value="' + esc(box) + '">' + esc(boxLabel(box) + (boxWbNo(box) ? "" : " · " + box)) + '</option>').join("");
+    }
+    $("undo").disabled = moving ? !fbo.lastMove : !fbo.items.length && !fbo.box && !fboLastDel && !fbo.lastMove;
+    $("fbodelmode").disabled = moving || (!fbo.items.length && !fboDelMode);
     $("fbobox").disabled = $("fbolist").disabled = $("fbogoods").disabled = !fbo.items.length;
     const step = $("step");
-    if (fboDelMode) {
+    const boxNote = fbo.box ? " · <b>" + esc(boxLabel(fbo.box)) + "</b> (" + fbo.items.filter((it) => it.box === fbo.box).length + " шт.)" : "";
+    if (moving) {
+      const dest = moveTarget && boxLabel(moveTarget);
+      step.className = "step";
+      scan.placeholder = dest ? "КИЗ для переноса" : "QR короба назначения";
+      step.innerHTML = '<div class="badge">→</div><div class="title">' +
+        (dest ? "Короб назначения · " + esc(dest) : "Куда перенести товар?") + '</div><div class="sub">' +
+        (dest ? 'Сканируйте КИЗ по одному или нажмите «Перенести» в списке «Все отсканированные КИЗ».'
+          : "Отсканируйте QR короба назначения или выберите короб из списка.") + "</div>";
+    } else if (fboDelMode) {
       step.className = "step err";
       step.innerHTML = '<div class="badge">−</div><div class="title">Режим удаления' + (fboDelCount ? ": удалено " + fboDelCount + " шт." : "") + '</div><div class="sub">Каждый отсканированный КИЗ удаляется из поставки. Закончили — нажмите «Выключить удаление».</div>';
-    }
-    const boxNote = fbo.box ? " · <b>" + esc(boxLabel(fbo.box)) + "</b> (" + fbo.items.filter((it) => it.box === fbo.box).length + " шт.)" : "";
-    if (fboDelMode) {
-      // step already shows the deletion prompt
     } else if (!fbo.box) {
       step.className = "step";
       step.innerHTML = '<div class="badge">1</div><div class="title">Сканируйте QR-код короба</div><div class="sub">Этикетка WB на коробе. Потом в этот короб: баркод товара → КИЗ.</div>';
@@ -814,13 +915,17 @@ body { margin: 0; }
     if (!editing) $("fbosum").innerHTML = boxOrder.map((bx) => {
       const rows = sum.filter((r) => r.box === bx).sort((a, b) => String(a.article || a.barcode).localeCompare(String(b.article || b.barcode)));
       const total = rows.reduce((n, r) => n + r.n, 0);
-      return '<tr class="boxrow' + (bx === fbo.box ? " cur" : "") + '" data-box="' + esc(bx) + '" title="Нажмите, чтобы сделать текущим"><td colspan="4"><b>' + esc(boxLabel(bx)) + "</b> · " + total + " шт." +
+      return '<tr class="boxrow' + (bx === displayBox ? " cur" : "") + '" data-box="' + esc(bx) + '"' + (moving ? "" : ' title="Нажмите, чтобы сделать текущим"') + '><td colspan="4"><b>' + esc(boxLabel(bx)) + "</b> · " + total + " шт." +
         (bx === fbo.box ? ' <span class="chip ok">текущий</span>' : ' <span class="chip">сделать текущим</span>') + ' <button type="button" class="x boxdel" data-boxdel="' + esc(bx) + '">Удалить короб</button>' + (/^\d{6,12}$/.test(bx) || /^WB_\d+$/.test(bx) ? "" : ' <label class="boxnum">№ на WB <input data-boxnum="' + esc(bx) + '" inputmode="numeric" placeholder="напр. 13744350" value="' + esc(boxWbNo(bx)) + '"' + (boxWbNo(bx) ? "" : ' class="need"') + "></label>") + "</td></tr>" +
         rows.map((r) => '<tr class="' + (bx === fbo.box && r.barcode && r.barcode === fbo.expect ? "curbox" : "") + '"><td><b>' + esc(r.article || "артикул ?") + '</b></td><td class="num qty">' + r.n + ' шт.</td><td class="num">' + (r.barcode ? esc(r.barcode) : '<span class="chip wait">неизвестен</span>') + '</td><td class="name">' + esc(r.name) + "</td></tr>").join("");
     }).join("") || '<tr><td colspan="4" class="file">Пока пусто</td></tr>';
     $("fbocount").textContent = fbo.items.length;
-    $("fboitems").innerHTML = fbo.items.map((it, i) =>
-      '<tr><td class="num">' + esc(itemBarcode(it) || "—") + "</td><td>" + esc(itemArticle(it) || "GTIN " + it.gtin) + '</td><td title="' + esc(it.box) + '">' + esc(boxLabel(it.box)) + '</td><td class="kizcell">' + kizHtml(it.kiz) + '</td><td class="acts"><button class="x" type="button" data-fdel="' + i + '" aria-label="Удалить КИЗ">×</button></td></tr>').reverse().join("");
+    $("fboitems").innerHTML = fbo.items.map((it, i) => {
+      const action = moving
+        ? '<button type="button" data-fmove="' + esc(kizKey(it.kiz)) + '"' + (!moveTarget || it.box === moveTarget ? " disabled" : "") + '>Перенести</button>'
+        : '<button class="x" type="button" data-fdel="' + i + '" aria-label="Удалить КИЗ">×</button>';
+      return '<tr><td class="num">' + esc(itemBarcode(it) || "—") + "</td><td>" + esc(itemArticle(it) || "GTIN " + it.gtin) + '</td><td title="' + esc(it.box) + '">' + esc(boxLabel(it.box)) + '</td><td class="kizcell">' + kizHtml(it.kiz) + '</td><td class="acts">' + action + '</td></tr>';
+    }).reverse().join("");
     const need = [...new Set(fbo.items.filter((it) => !itemBarcode(it) || !itemArticle(it)).map((it) => it.gtin))];
     $("fbounknown").innerHTML = need.length ? '<div class="unk"><b>Впишите артикул для этих товаров (нужен для УПД, вписывается один раз)</b>' +
       need.map((g) => { const i = gtinMap[g] || {}; return '<div class="row"><span class="mono">GTIN ' + esc(g) + '</span><input data-ug="' + g + '" data-uf="barcode" inputmode="numeric" placeholder="Баркод WB с этикетки" value="' + esc(wbBarcode(g)) + '"><input data-ug="' + g + '" data-uf="article" placeholder="Артикул продавца" value="' + esc(i.article || "") + '"><button type="button" data-usave="' + g + '">Сохранить</button></div>'; }).join("") +
@@ -828,6 +933,12 @@ body { margin: 0; }
     renderUpd();
   }
   $("fboitems").addEventListener("click", (e) => {
+    const move = e.target.closest("[data-fmove]");
+    if (move && moveTarget) {
+      moveFboItem(move.dataset.fmove);
+      scan.focus({ preventScroll: true });
+      return;
+    }
     const b = e.target.closest("[data-fdel]");
     if (!b) return;
     if (!b.dataset.armed) {
@@ -847,6 +958,7 @@ body { margin: 0; }
   });
   $("fbosum").addEventListener("click", (e) => {
     if (e.target.closest("input, label")) return;
+    if (moveTarget !== null) return;
     const bd = e.target.closest("[data-boxdel]");
     if (bd) {
       if (!bd.dataset.armed) {
@@ -891,7 +1003,9 @@ body { margin: 0; }
   $("fbonew").addEventListener("click", () => { $("fbonewconfirm").hidden = false; });
   $("fbonewno").addEventListener("click", () => { $("fbonewconfirm").hidden = true; });
   $("fbonewyes").addEventListener("click", () => {
-    fbo = { items: [], box: "", expect: "", del: {}, epoch: Date.now() };
+    fbo = emptyFbo(Date.now());
+    moveTarget = null; fboLastDel = null;
+    if (fboDelMode) setDelMode(false);
     saveFbo(); $("fbonewconfirm").hidden = true; render();
     note("ok", "Начата новая поставка. Сканируйте QR-код первого короба.");
   });
@@ -1453,6 +1567,7 @@ body { margin: 0; }
 
   function render() {
     document.body.dataset.mode = mode;
+    $("undo").textContent = mode === "fbo" && fbo.lastMove ? "Отменить перенос" : "Отменить последний";
     document.querySelectorAll(".modes [data-mode]").forEach((b) => b.setAttribute("aria-selected", b.dataset.mode === mode ? "true" : "false"));
     scan.placeholder = mode === "fbo" ? "QR короба → баркод товара → КИЗ" : "Сканируйте стикер или КИЗ, либо введите цифры стикера + Enter";
     if (mode === "fbo") return renderFbo();
@@ -1974,7 +2089,7 @@ body { margin: 0; }
     return {
       v: 1,
       fbs: state.demo ? null : { fileId: state.fileId, fileT: state.fileT || 1, fileName: state.fileName, b64: state.b64, kiz, removed: state.removed || {} },
-      fbo: { epoch: fbo.epoch, del: fbo.del, items: fbo.items.map((it) => ({ kiz: it.kiz, box: it.box, gtin: it.gtin, barcode: it.barcode || "", t: it.t || 1 })) },
+      fbo: { epoch: fbo.epoch, del: fbo.del, items: fbo.items.map((it) => ({ kiz: it.kiz, box: it.box, gtin: it.gtin, barcode: it.barcode || "", t: it.t || 1, ...(it.boxT ? { boxT: it.boxT } : {}) })) },
       gtin: gtinMap, bc: bcMap, boxnum: boxNumMap, req
     };
   }
@@ -2008,12 +2123,26 @@ body { margin: 0; }
       }
       // FBO
       if (R.fbo) {
-        if ((R.fbo.epoch || 0) > fbo.epoch) { fbo.epoch = R.fbo.epoch; fbo.items = fbo.items.filter((it) => (it.t || 0) >= fbo.epoch); fbo.del = {}; }
+        if ((R.fbo.epoch || 0) > fbo.epoch) {
+          const items = fbo.items.filter((it) => it.t >= R.fbo.epoch);
+          fbo = emptyFbo(R.fbo.epoch); fbo.items = items;
+          moveTarget = null; fboLastDel = null;
+          if (fboDelMode) setDelMode(false);
+        }
         Object.keys(R.fbo.del || {}).forEach((k) => { if ((R.fbo.del[k] || 0) > (fbo.del[k] || 0)) fbo.del[k] = R.fbo.del[k]; });
-        const have = new Set(fbo.items.map((it) => kizKey(it.kiz)));
+        const have = new Map(fbo.items.map((it) => [kizKey(it.kiz), it]));
         (R.fbo.items || []).forEach((it) => {
-          const k = kizKey(it.kiz);
-          if (!have.has(k) && (it.t || 0) >= fbo.epoch) { fbo.items.push(Object.assign({}, it)); have.add(k); }
+          if ((it.t || 0) < fbo.epoch) return;
+          const k = kizKey(it.kiz), local = have.get(k);
+          if (!local) {
+            const copy = Object.assign({}, it);
+            fbo.items.push(copy); have.set(k, copy);
+          } else if (it.t > local.t) {
+            Object.assign(local, it, { boxT: it.boxT || 0 });
+          } else if (it.t === local.t && it.boxT && (it.boxT > (local.boxT || 0) || (it.boxT === local.boxT && it.box > local.box))) {
+            // Moving changes only placement. Deletions and new supplies still use the original scan timestamp.
+            local.box = it.box; local.boxT = it.boxT;
+          }
         });
         fbo.items = fbo.items.filter((it) => !((fbo.del[kizKey(it.kiz)] || 0) >= (it.t || 0)) && (it.t || 0) >= fbo.epoch);
         fbo.items.sort((a, b) => (a.t || 0) - (b.t || 0));
