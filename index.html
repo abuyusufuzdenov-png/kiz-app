@@ -316,6 +316,18 @@ body { margin: 0; }
   .station { position: static; }
   footer { display: none; }
 }
+.shopgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.shopcard, .shopdocs { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.shopcard { display: grid; align-content: start; gap: 4px; min-width: 0; }
+.shopcard .file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shopcard .gbtns { margin-top: 4px; }
+.shopcard button { justify-content: center; min-height: 38px; }
+.shopdocs, .scope { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.shopdocs select, .scope select { min-height: 38px; }
+.shopdocs { scroll-margin-top: 160px; }
+.shopdocs label { display: grid; gap: 4px; min-width: 0; max-width: 100%; color: var(--muted); font-size: 13px; }
+.shopdocs label select { width: 100%; color: var(--ink); }
+@media (max-width: 640px) { .shopdocs { scroll-margin-top: 10px; } }
 </style>
 </head>
 <body>
@@ -334,16 +346,15 @@ body { margin: 0; }
     </div>
     <div class="actions">
       <div class="progress fbsonly"><span id="count">0 / 0</span><span class="bar"><i id="barfill"></i></span></div>
-      <button type="button" id="pick" class="fbsonly">Загрузить файл</button>
       <input type="file" id="file" class="vh" tabindex="-1" aria-hidden="true" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,application/octet-stream">
       <button id="undo" type="button" disabled>Отменить последний</button>
       <button id="fbomove" type="button" class="fboonly" aria-pressed="false" disabled>Перенос между коробами</button>
       <button id="fbodelmode" type="button" class="fboonly" disabled>Удалить КИЗ сканом</button>
-      <button id="export" class="primary fbsonly" type="button" disabled>Скачать xlsx</button>
-      <button id="share" type="button" class="fbsonly" hidden disabled>Отправить файл</button>
     </div>
   </header>
 
+  <section class="shopgrid fbsonly" id="shops" aria-label="Сборочные задания магазинов"></section>
+  <div class="msg err fbsonly" id="storagewarn" role="alert" hidden></div>
   <div class="demo fbsonly" id="demo">Сейчас на странице пример из трёх выдуманных заданий. Загрузите свой файл template-sgtin, чтобы начать работу.</div>
 
   <div class="bigstat mobonly" id="bigstat"></div>
@@ -364,13 +375,6 @@ body { margin: 0; }
     <details class="optsbox" id="optsbox">
     <summary>Настройки</summary>
     <div class="opts">
-      <label class="fbsonly">Формат КИЗ в файле
-        <select id="kizmode">
-          <option value="full">Полный, с разделителями GS (так принимает WB)</option>
-          <option value="nogs">Полный, без разделителей</option>
-          <option value="short">Первые 31 символ (GTIN + серийный номер)</option>
-        </select>
-      </label>
       <label><input type="checkbox" id="sound" checked> Звук</label>
       <button type="button" id="soundtest" class="x" style="font-size:13px;border:1px solid var(--line);border-radius:6px;padding:4px 8px">Проверить звук</button>
       <label><input type="checkbox" id="layoutfix" checked> Исправлять русскую раскладку</label>
@@ -411,6 +415,9 @@ body { margin: 0; }
     </details>
   </section>
 
+  <label class="scope fbsonly" id="scopelabel" hidden>Сборка
+    <select id="scope"><option value="all">Все магазины</option><option value="0">Магазин 1</option><option value="1">Магазин 2</option></select>
+  </label>
   <button type="button" class="donetoggle fbsonly mobonly" id="donetoggle" hidden></button>
   <div class="tablebox fbsonly">
     <table>
@@ -420,10 +427,24 @@ body { margin: 0; }
   </div>
   <div id="removedbox" class="fbsonly removedbox" hidden></div>
 
+  <div class="msg err fbsonly" id="conflictwarn" role="alert" hidden></div>
+  <section class="shopdocs fbsonly" id="shopdocs" hidden>
+    <h2>Файлы магазина</h2>
+    <select id="docshop" aria-label="Магазин для выгрузки"><option value="0">Магазин 1</option><option value="1">Магазин 2</option></select>
+      <button id="export" class="primary fbsonly" type="button" disabled>Скачать Excel для WB</button>
+      <button id="share" type="button" class="fbsonly" hidden disabled>Отправить файл</button>
+      <label class="fbsonly">Формат КИЗ для WB
+        <select id="kizmode">
+          <option value="full">Полный, с разделителями GS (так принимает WB)</option>
+          <option value="nogs">Полный, без разделителей</option>
+          <option value="short">Первые 31 символ (GTIN + серийный номер)</option>
+        </select>
+      </label>
+  </section>
   <section class="upd" id="upd" hidden>
     <div class="updhead">
       <div>
-        <h2>Коды для УПД в СБИС</h2>
+        <h2 id="updheading">Коды для УПД в СБИС</h2>
         <p class="file">В СБИС: строка товара → «Коды» → «загрузить из файла» → выберите файл этого артикула.</p>
         <label class="file">Вид кода в файле
           <select id="updform">
@@ -504,7 +525,7 @@ body { margin: 0; }
     <div class="cambtns"><button type="button" id="torch" hidden>Фонарик</button><button type="button" id="camclose">Закрыть</button></div>
   </div>
 </div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="xlsx.full.min.js"></script>
 <script>
 (function () {
   const STORE = "kiz-station-v1";
@@ -512,10 +533,46 @@ body { margin: 0; }
   const $ = (id) => document.getElementById(id);
   const scan = $("scan");
 
-  let state = {
-    demo: true, fileName: "", b64: "", sheetName: "", cols: {}, rows: [],
-    selected: null, history: [], kizMode: "full"
-  };
+  function emptyShop(id) {
+    return { id, label: "Магазин " + (id + 1), demo: true, fileName: "", b64: "", sheetName: "",
+      cols: {}, rows: [], allRows: [], selected: null, history: [], kizMode: "full", kizT: {}, removed: {} };
+  }
+  const shops = [emptyShop(0), emptyShop(1)];
+  let state = shops[0]; // shop owning the current scan
+  let docShop = shops[0], scope = "all", importShop = shops[0], actionSeq = 0;
+  function visibleShops() {
+    return shops.filter((s) => !s.demo && (scope === "all" || s.id === Number(scope)));
+  }
+  function chooseScanShop(s) {
+    if (s !== state) state.selected = null;
+    state = s;
+  }
+  function latestUndoShop() {
+    return visibleShops().filter((s) => s.history.length)
+      .sort((a, b) => b.history[b.history.length - 1].seq - a.history[a.history.length - 1].seq)[0];
+  }
+  function duplicateShops() {
+    const first = new Map(), conflicts = new Map();
+    for (const shop of shops) {
+      if (shop.demo) continue;
+      for (const row of shop.rows) {
+        if (!row.kiz) continue;
+        const key = kizKey(row.kiz), prior = first.get(key);
+        if (!prior) { first.set(key, { shop, row }); continue; }
+        const message = prior.shop.label + ", " + rowLabel(prior.row) + " и " + shop.label + ", " + rowLabel(row);
+        conflicts.set(prior.shop, message); conflicts.set(shop, message);
+      }
+    }
+    return conflicts;
+  }
+  function kizOwner(key, except) {
+    for (const shop of shops) {
+      if (shop.demo) continue;
+      const row = shop.rows.find((r) => r !== except && r.kiz && kizKey(r.kiz) === key);
+      if (row) return shop.label + ", " + rowLabel(row);
+    }
+    return "";
+  }
 
   const DEMO_ROWS = [
     { r: 1, order: "1000000001", sticker: "10000000011234", brand: "Пример", name: "Шапка (пример)", article: "demo-hat", kiz: "" },
@@ -530,6 +587,7 @@ body { margin: 0; }
     if (m !== "fbo") moveTarget = null;
     if (typeof fboDelMode !== "undefined" && fboDelMode && m !== "fbo") { fboDelMode = false; $("fbodelmode").classList.remove("armed"); $("fbodelmode").textContent = "Удалить КИЗ сканом"; }
     mode = m;
+    loadReq();
     try { localStorage.setItem("kiz-mode", m); } catch (e) {}
     hideMsg(); render();
     scan.focus({ preventScroll: true });
@@ -770,8 +828,8 @@ body { margin: 0; }
     const key = kizKey(v), gtin = gtinOf(v);
     const dupF = fbo.items.find((it) => kizKey(it.kiz) === key);
     if (dupF) return fail("Этот КИЗ уже отсканирован (" + boxLabel(dupF.box) + ").");
-    const dupS = state.rows.find((r) => r.kiz && kizKey(r.kiz) === key);
-    if (dupS) return fail("Этот КИЗ уже привязан к FBS-заданию " + rowLabel(dupS) + ".");
+    const dupS = kizOwner(key);
+    if (dupS) return fail("Этот КИЗ уже привязан к заданию FBS. " + dupS + ".");
     if (!fbo.box) return fail("Сначала отсканируйте QR-код короба, потом баркод и КИЗ товаров.");
     const item = { kiz: v, box: fbo.box, gtin, t: Date.now() };
     if (!fbo.expect && !wbBarcode(gtin)) return fail("Сначала отсканируйте баркод товара (с этикетки WB), потом КИЗ.");
@@ -1103,38 +1161,42 @@ body { margin: 0; }
   });
 
   // tasks deleted by hand (order cancelled): removed[sheetRow] = { on, t }; the rows stay in allRows so a deletion can be undone
-  function applyRemoved() {
-    const all = state.allRows || state.rows;
-    state.allRows = all;
-    state.rows = all.filter((r) => !(state.removed && state.removed[r.r] && state.removed[r.r].on));
+  function applyRemoved(shop = state) {
+    shop.rows = shop.allRows.filter((r) => !shop.removed[r.r]?.on);
   }
   function hashStr(t) { let h = 5381; for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return (h >>> 0).toString(36) + t.length; }
 
-  // ---------- storage ----------
-  function save() {
-    if (state.demo) return;
-    try {
-      const kiz = {};
-      (state.allRows || state.rows).forEach((row) => { if (row.kiz) kiz[row.r] = row.kiz; });
-      localStorage.setItem(STORE, JSON.stringify({ fileName: state.fileName, b64: state.b64, kiz, kizMode: state.kizMode, kizT: state.kizT, fileT: state.fileT, fileId: state.fileId, removed: state.removed || {} }));
-    } catch (e) {}
+  // The first shop keeps the original storage key so existing jobs open in place.
+  function shopKey(key, shop) { return shop.id === 0 ? key : key + "-shop2"; }
+  function persist(shop) {
+    if (shop.demo) return;
+    const kiz = {};
+    shop.allRows.forEach((r) => { if (r.kiz || shop.kizT[r.r]) kiz[r.r] = r.kiz; });
+    const { fileName, b64, kizMode, kizT, fileT, fileId, removed } = shop;
+    localStorage.setItem(shopKey(STORE, shop), JSON.stringify({ fileName, b64, kiz, kizMode, kizT, fileT, fileId, removed }));
+  }
+  function save(shop = state) {
+    try { persist(shop); } catch (e) {
+      $("storagewarn").hidden = false;
+      $("storagewarn").textContent = "Не удалось сохранить задания на устройстве. Скачайте Excel для WB перед закрытием.";
+    }
     scheduleSync();
   }
-  function restore() {
+  function restore(shop) {
     try {
-      const raw = localStorage.getItem(STORE);
-      if (!raw) return false;
-      const s = JSON.parse(raw);
-      if (!s.b64) return false;
-      loadBuffer(b64ToBuf(s.b64), s.fileName, s.kiz || {});
-      state.kizT = s.kizT || {};
-      state.removed = s.removed || {};
-      applyRemoved();
-      state.fileT = s.fileT || 0;
-      if (s.fileId) state.fileId = s.fileId;
-      if (s.kizMode) { state.kizMode = s.kizMode; $("kizmode").value = s.kizMode; }
-      return true;
-    } catch (e) { return false; }
+      const s = JSON.parse(localStorage.getItem(shopKey(STORE, shop)) || "null");
+      if (!s || !s.b64) return;
+      const values = Object.assign({}, s.kiz);
+      // Older saves omitted empty cells, including codes explicitly cleared by the user.
+      Object.keys(s.kizT || {}).forEach((r) => { if (!(r in values)) values[r] = ""; });
+      Object.assign(shop, parseWorkbook(b64ToBuf(s.b64), s.fileName, values));
+      shop.kizT = s.kizT || {}; shop.removed = s.removed || {}; shop.fileT = s.fileT || 0;
+      shop.kizMode = s.kizMode || "full";
+      applyRemoved(shop);
+    } catch (e) {
+      $("storagewarn").hidden = false;
+      $("storagewarn").textContent = "Не удалось открыть сохранённый файл. " + shop.label + ".";
+    }
   }
   function bufToB64(buf) {
     const bytes = new Uint8Array(buf); let s = "";
@@ -1155,7 +1217,7 @@ body { margin: 0; }
     }
     return -1;
   }
-  function loadBuffer(buf, fileName, kizOverride) {
+  function parseWorkbook(buf, fileName, kizOverride) {
     if (typeof XLSX === "undefined") throw new Error("Библиотека для чтения Excel не загрузилась. Обновите страницу.");
     const wb = XLSX.read(buf, { type: "array" });
     let found = null;
@@ -1190,11 +1252,54 @@ body { margin: 0; }
       });
     }
     if (!rows.length) throw new Error("В файле нет строк со стикерами.");
-    rows.forEach((r) => { if (r.kiz) learnGtin(r.kiz, r.article, r.name); });
-    state = Object.assign(state, {
-      demo: false, fileName, b64: bufToB64(buf), sheetName: found.name, cols, allRows: rows, rows, selected: null, history: [], kizT: {}, removed: {}
+    const b64 = bufToB64(buf);
+    return { demo: false, fileName, b64, fileId: fileName + ":" + hashStr(b64), sheetName: found.name,
+      cols, allRows: rows, rows, selected: null, history: [], kizT: {}, removed: {} };
+  }
+
+  // Workbook row numbers change when WB adds, reorders or removes jobs.
+  function forMatchingRows(target, source, visit) {
+    function bySticker(rows) {
+      const map = new Map();
+      for (const row of rows) {
+        if (!map.has(row.sticker)) map.set(row.sticker, []);
+        map.get(row.sticker).push(row);
+      }
+      return map;
+    }
+    const from = bySticker(source.allRows), to = bySticker(target.allRows);
+    for (const row of target.allRows) {
+      const matches = (map) => (map.get(row.sticker) || []).filter((r) => !r.order || !row.order || r.order === row.order);
+      const candidates = matches(from);
+      if (candidates.length === 1 && matches(to).length === 1) visit(row, candidates[0]);
+    }
+  }
+
+  function importWorkbook(shop, buf, fileName) {
+    const next = Object.assign(emptyShop(shop.id), parseWorkbook(buf, fileName), { kizMode: shop.kizMode, fileT: Date.now() });
+    const seen = new Map();
+    for (const other of shops) if (other !== shop && !other.demo) {
+      for (const r of other.rows) if (r.kiz) seen.set(kizKey(r.kiz), other.label);
+    }
+    forMatchingRows(next, shop, (row, old) => {
+      if (old.kiz || shop.kizT[old.r]) {
+        row.kiz = old.kiz;
+        next.kizT[row.r] = shop.kizT[old.r] || next.fileT;
+      }
+      if (shop.removed[old.r]) next.removed[row.r] = shop.removed[old.r];
     });
-    state.fileId = fileName + ":" + hashStr(state.b64);
+    for (const row of next.allRows) {
+      if (!row.kiz || next.removed[row.r]?.on) continue;
+      const key = kizKey(row.kiz);
+      if (seen.has(key)) throw new Error("КИЗ у стикера " + row.sticker + " уже используется (" + seen.get(key) + "). Проверьте файл.");
+      seen.set(key, "стикер " + row.sticker);
+      if (!next.kizT[row.r]) next.kizT[row.r] = next.fileT;
+    }
+    applyRemoved(next);
+    try { persist(next); } catch (e) { throw new Error("Для этого файла не хватает места на устройстве. Прежние задания сохранены."); }
+    Object.assign(shop, next);
+    shop.rows.forEach((r) => { if (r.kiz) learnGtin(r.kiz, r.article, r.name); });
+    scheduleSync();
   }
 
   // ---------- scanner input: layout-independent ----------
@@ -1296,11 +1401,24 @@ body { margin: 0; }
   $("focushint").addEventListener("click", () => scan.focus());
   scan.addEventListener("focus", checkFocus);
   let picking = false;
-  $("pick").addEventListener("click", () => {
-    picking = true;
-    $("file").click();
-    setTimeout(() => { picking = false; }, 60000);
+  $("shops").addEventListener("click", (e) => {
+    const card = e.target.closest("[data-shop]");
+    if (!card) return;
+    const shop = shops[Number(card.dataset.shop)];
+    if (e.target.closest("[data-pick]")) {
+      importShop = shop; picking = true; $("file").click();
+      setTimeout(() => { picking = false; }, 60000);
+    } else if (e.target.closest("[data-docs]")) {
+      chooseDocShop(shop); $("shopdocs").scrollIntoView({ block: "start" });
+    }
   });
+  $("scope").addEventListener("change", (e) => {
+    scope = e.target.value; state.selected = null; hideMsg(); render(); scan.focus({ preventScroll: true });
+  });
+  function chooseDocShop(shop) {
+    docShop = shop; loadReq(); render();
+  }
+  $("docshop").addEventListener("change", (e) => chooseDocShop(shops[Number(e.target.value)]));
   scan.addEventListener("blur", () => {
     setTimeout(() => {
       if (picking || TOUCH || camOn) return;
@@ -1355,7 +1473,7 @@ body { margin: 0; }
     ls.innerHTML = 'Последний скан: <span class="mono">' + kizHtml(v) + "</span> (" + v.length + " симв.)";
     ls.hidden = false;
     if (mode === "fbo") return processFbo(v);
-    if (state.demo) return fail("Сейчас загружен пример, а не ваш файл. Нажмите «Загрузить файл» и выберите template-sgtin из WB.");
+    if (!visibleShops().length) return fail("Загрузите Excel с заданиями из кабинета WB в карточку магазина.");
     if (isKiz(v)) return assignKiz(v);
     return findSticker(v);
   }
@@ -1372,31 +1490,31 @@ body { margin: 0; }
 
   function findSticker(v) {
     const decoded = decodeWbSticker(v);
-    if (decoded) {
-      $("lastscan").innerHTML += ' → стикер <span class="mono">' + decoded + "</span>";
-      const hit = state.rows.findIndex((r) => r.sticker === decoded);
-      if (hit >= 0) return select(hit, true);
-      return fail("Стикер " + decoded + " не найден в этом файле. Проверьте, что загружен свежий файл с этими заданиями.");
+    state.selected = null;
+    const digits = decoded || v.replace(/\D/g, "");
+    if (decoded) $("lastscan").innerHTML += ' → стикер <span class="mono">' + decoded + "</span>";
+    const entries = visibleShops().flatMap((shop) => shop.rows.map((row, i) => ({ shop, row, i })));
+    let hits = entries.filter(({ row }) => row.sticker === digits || (!decoded && digits && row.order === digits));
+    if (!decoded && !hits.length && digits.length >= 4) hits = entries.filter(({ row }) => row.sticker.endsWith(digits));
+    if (!decoded && !hits.length && digits.length >= 4) hits = entries.filter(({ row }) => row.sticker.includes(digits) || (digits.length >= 8 && digits.includes(row.sticker)));
+    if (hits.length === 1) {
+      chooseScanShop(hits[0].shop);
+      return select(hits[0].i, true);
     }
-    const digits = v.replace(/\D/g, "");
-    if (!digits) return fail("Код «" + v + "» не похож ни на стикер, ни на КИЗ. Введите цифры под штрихкодом стикера.");
-    let hits = state.rows.filter((r) => r.sticker === digits || r.order === digits);
-    if (!hits.length && digits.length >= 4) hits = state.rows.filter((r) => r.sticker.endsWith(digits));
-    if (!hits.length && digits.length >= 4) hits = state.rows.filter((r) => r.sticker.includes(digits) || (digits.length >= 8 && digits.includes(r.sticker)));
-    if (hits.length === 1) return select(state.rows.indexOf(hits[0]), true);
-    if (hits.length > 1) return fail("Под «" + digits + "» подходит " + hits.length + " задания. Введите больше цифр.");
-    return fail("Стикер " + digits + " не найден в этом файле. Проверьте, что загружен файл с нужными заданиями.");
+    render();
+    if (hits.length > 1) return fail("Совпало несколько заданий. Сканируйте полный стикер или выберите нужную строку по магазину.");
+    return fail("Стикер " + (digits || v) + " не найден. Проверьте файл и выбранный магазин.");
   }
 
   function select(idx, fromScan) {
     state.selected = idx;
     const row = state.rows[idx];
     render();
-    const tr = document.querySelector('tr[data-i="' + idx + '"]');
+    const tr = document.querySelector('#rows tr[data-shop="' + state.id + '"][data-i="' + idx + '"]');
     if (tr) tr.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     if (row.kiz) note("warn", "У задания " + rowLabel(row) + " уже есть КИЗ. Новый скан КИЗ заменит его.");
     else hideMsg();
-    if (fromScan) { beep("barcode"); flash("info", "→", row.article || "Задание " + row.order, "Теперь КИЗ"); }
+    if (fromScan) { beep("barcode"); flash("info", "→", row.article || "Задание " + row.order, state.label + " · теперь КИЗ"); }
     scan.focus({ preventScroll: true });
   }
 
@@ -1410,26 +1528,26 @@ body { margin: 0; }
     }
     const row = state.rows[state.selected];
     const key = kizKey(v);
-    const dup = state.rows.find((r) => r !== row && r.kiz && kizKey(r.kiz) === key);
-    if (dup) return fail("Этот КИЗ уже привязан к заданию " + rowLabel(dup) + ". Отсканируйте другой код.");
-    const value = state.kizMode === "short" ? key : v;
-    state.history.push({ r: row.r, prev: row.kiz });
+    const dup = kizOwner(key, row);
+    if (dup) return fail("Этот КИЗ уже записан. " + dup + ". Отсканируйте другой код.");
+    state.history.push({ seq: ++actionSeq, r: row.r, prev: row.kiz });
     state.kizT[row.r] = Date.now();
     const replaced = !!row.kiz;
-    row.kiz = value;
+    row.kiz = v;
     learnGtin(v, row.article, row.name);
     const i = state.selected;
     state.selected = null;
     save(); render();
-    const tr = document.querySelector('tr[data-i="' + i + '"]');
+    const tr = document.querySelector('#rows tr[data-shop="' + state.id + '"][data-i="' + i + '"]');
     if (tr) { tr.classList.remove("flash"); void tr.offsetWidth; tr.classList.add("flash"); }
-    const left = state.rows.filter((r) => !r.kiz).length;
-    const doneN = state.rows.length - left;
+    const rows = visibleShops().flatMap((s) => s.rows);
+    const left = rows.filter((r) => !r.kiz).length;
+    const doneN = rows.length - left;
     const completed = !replaced && left === 0;
     const hundredS = !replaced && doneN % 100 === 0;
     if (hundredS) flash("ok", "★", "Собрано " + doneN + " шт.!", left ? "Осталось " + left : "Все задания собраны");
     else flash("ok", "✓", row.article || rowLabel(row), left ? "Осталось " + left : "Все задания собраны");
-    note("ok", (replaced ? "КИЗ заменён: " : "КИЗ записан: ") + rowLabel(row) + ", " + (row.article || "") +
+    note("ok", (replaced ? "КИЗ заменён: " : "КИЗ записан: ") + state.label + ", " + rowLabel(row) + ", " + (row.article || "") +
       (left ? ". Осталось " + left + ". Сканируйте следующий стикер." : ". Все задания заполнены, можно скачивать файл."));
     beep(completed ? "complete" : hundredS ? "hundred" : "kiz");
   }
@@ -1448,6 +1566,9 @@ body { margin: 0; }
 
   function restoreTask(r) {
     if (!state.removed || !state.removed[r]) return;
+    const item = state.allRows.find((x) => x.r === r);
+    if (item?.kiz && kizOwner(kizKey(item.kiz), item)) return fail("КИЗ этого задания уже используется. Сначала освободите код.");
+    state.selected = null;
     state.removed[r] = { on: false, t: Date.now() };
     applyRemoved(); save(); render();
     const row = state.rows.find((x) => x.r === r);
@@ -1459,7 +1580,7 @@ body { margin: 0; }
     if (!row) return;
     if (!state.removed) state.removed = {};
     state.removed[row.r] = { on: true, t: Date.now() };
-    state.history.push({ restore: row.r });
+    state.history.push({ seq: ++actionSeq, restore: row.r });
     state.selected = null;
     applyRemoved(); save(); render();
     note("warn", "Задание " + rowLabel(row) + " удалено" + (row.kiz ? " вместе с КИЗ" : "") + " — его не будет в файле для WB и в УПД. Вернуть — «Отменить последний».");
@@ -1468,7 +1589,7 @@ body { margin: 0; }
   function clearKiz(i) {
     const row = state.rows[i];
     if (!row.kiz) return;
-    state.history.push({ r: row.r, prev: row.kiz });
+    state.history.push({ seq: ++actionSeq, r: row.r, prev: row.kiz });
     row.kiz = "";
     state.kizT[row.r] = Date.now();
     save(); render();
@@ -1476,8 +1597,14 @@ body { margin: 0; }
   }
 
   function undo() {
-    const h = state.history.pop();
-    if (!h) return;
+    const shop = latestUndoShop();
+    if (!shop) return;
+    chooseScanShop(shop);
+    const h = state.history[state.history.length - 1];
+    const prior = h.restore != null ? state.allRows.find((r) => r.r === h.restore)?.kiz : h.prev;
+    const entry = state.allRows.find((r) => r.r === (h.restore ?? h.r));
+    if (prior && kizOwner(kizKey(prior), entry)) return fail("Прежний КИЗ уже используется в другом задании.");
+    state.history.pop();
     state.selected = null;
     if (h.restore != null) {
       state.removed[h.restore] = { on: false, t: Date.now() };
@@ -1592,24 +1719,47 @@ body { margin: 0; }
   let showDone = false;
   $("donetoggle").addEventListener("click", () => { showDone = !showDone; render(); });
   function renderFbs() {
-    // deleted tasks can be brought back at any time
-    const gone = (state.allRows || []).filter((r) => state.removed && state.removed[r.r] && state.removed[r.r].on);
+    const loaded = shops.filter((shop) => !shop.demo);
+    const demo = !loaded.length;
+    const visible = visibleShops();
+    const displayed = demo ? [shops[0]] : visible;
+    const gone = visible.flatMap((shop) => shop.allRows.filter((r) => shop.removed[r.r]?.on).map((r) => ({ shop, r })));
     $("removedbox").hidden = !gone.length;
-    $("removedbox").innerHTML = gone.length ? "<b>Удалённые задания (" + gone.length + ")</b>" + gone.map((r) =>
-      '<div class="rrow"><span>' + esc(rowLabel(r)) + " · стикер " + esc(r.sticker) + " · " + esc(r.article || "") + (r.kiz ? " · с КИЗ" : "") + '</span><button type="button" data-restore="' + r.r + '">Вернуть</button></div>').join("") : "";
-    const done = state.rows.filter((r) => r.kiz).length, total = state.rows.length;
-    $("bigstat").innerHTML = state.demo ? "" : '<div class="nums"><div><div class="big' + (done === total ? " done" : "") + '">' + (total - done) + '</div><div class="lbl">осталось собрать</div></div>' +
+    $("removedbox").innerHTML = gone.length ? "<b>Удалённые задания (" + gone.length + ")</b>" + gone.map(({ shop, r }) =>
+      '<div class="rrow"><span>' + shop.label + " · " + esc(rowLabel(r)) + " · стикер " + esc(r.sticker) + " · " + esc(r.article || "") + (r.kiz ? " · с КИЗ" : "") + '</span><button type="button" data-shop="' + shop.id + '" data-restore="' + r.r + '">Вернуть</button></div>').join("") : "";
+    const rows = displayed.flatMap((shop) => shop.rows);
+    const done = rows.filter((r) => r.kiz).length, total = rows.length;
+    $("shops").innerHTML = shops.map((shop) => {
+      const filled = shop.rows.filter((r) => r.kiz).length;
+      return '<article class="shopcard" data-shop="' + shop.id + '"><strong>' + shop.label + '</strong>' +
+        '<span class="file" title="' + esc(shop.fileName) + '">' + (shop.demo ? "Нет задания" : esc(shop.fileName)) + '</span>' +
+        (shop.demo ? "" : '<span class="file">Собрано ' + filled + ' из ' + shop.rows.length + '</span>') +
+        '<div class="gbtns"><button type="button" data-pick>' + (shop.demo ? 'Загрузить Excel' : 'Обновить') + '</button>' +
+        (shop.demo ? "" : '<button type="button" data-docs>Файлы</button>') + '</div></article>';
+    }).join("");
+    $("scopelabel").hidden = loaded.length < 2;
+    $("scope").value = scope;
+    $("bigstat").innerHTML = demo ? "" : '<div class="nums"><div><div class="big' + (done === total ? " done" : "") + '">' + (total - done) + '</div><div class="lbl">осталось собрать</div></div>' +
       '<div class="right"><div class="big done">' + done + '</div><div class="lbl">из ' + total + " готово</div></div></div>";
-    $("bigstat").hidden = state.demo;
-    $("donetoggle").hidden = state.demo || !done || done === total;
+    $("bigstat").hidden = demo;
+    $("donetoggle").hidden = demo || !done || done === total;
     $("donetoggle").textContent = showDone ? "Скрыть собранные (" + done + ")" : "Показать собранные (" + done + ")";
     $("count").textContent = done + " / " + total;
     $("barfill").style.width = total ? (done / total * 100) + "%" : "0";
-    $("demo").hidden = !state.demo;
-    $("fileinfo").textContent = state.demo ? "Пример. Загрузите файл sgtin из кабинета WB" : state.fileName + " · лист «" + state.sheetName + "»";
-    $("export").disabled = state.demo || !done;
-    $("share").hidden = !CAN_SHARE; $("share").disabled = state.demo || !done;
-    $("undo").disabled = !state.history.length;
+    $("demo").hidden = !demo;
+    $("fileinfo").textContent = demo ? "Загрузите сборочное задание из кабинета WB" : (visible.length === 2 ? "Все магазины" : visible[0]?.label || "") + " · осталось собрать " + (total - done);
+    if (docShop.demo && loaded.length) { docShop = loaded[0]; loadReq(); }
+    $("shopdocs").hidden = demo;
+    $("docshop").value = String(docShop.id);
+    shops.forEach((s) => { $("docshop").options[s.id].disabled = s.demo; });
+    $("kizmode").value = docShop.kizMode;
+    const conflicts = duplicateShops();
+    const conflict = conflicts.get(docShop);
+    $("conflictwarn").hidden = !conflicts.size;
+    $("conflictwarn").textContent = conflicts.size ? "Один КИЗ записан дважды. " + [...new Set(conflicts.values())].join(". ") + ". Откройте нужную строку и исправьте КИЗ перед выгрузкой." : "";
+    $("export").disabled = docShop.demo || !!conflict || !docShop.rows.some((r) => r.kiz);
+    $("share").hidden = !CAN_SHARE; $("share").disabled = $("export").disabled;
+    $("undo").disabled = !latestUndoShop();
 
     const step = $("step");
     if (state.selected == null) {
@@ -1620,23 +1770,24 @@ body { margin: 0; }
       const r = state.rows[state.selected];
       step.className = "step kiz";
       step.innerHTML = '<div class="badge">2</div><div class="title">Сканируйте КИЗ для ' + esc(r.article || "товара") + "</div>" +
-        '<div class="sub">' + esc(r.name) + ' · задание <b class="mono">' + esc(r.order) + '</b> · стикер <b class="mono">' + esc(r.sticker) + "</b></div>";
+        '<div class="sub"><b>' + state.label + '</b> · ' + esc(r.name) + ' · задание <b class="mono">' + esc(r.order) + '</b> · стикер <b class="mono">' + esc(r.sticker) + "</b></div>";
     }
 
     renderUpd();
     const tb = $("rows");
-    tb.innerHTML = state.rows.map((r, i) => {
-      const cls = [r.kiz ? "done" : "", state.selected === i ? "sel" : "", r.kiz && !showDone && state.selected !== i && done !== total ? "hidedone" : ""].join(" ");
-      return '<tr data-i="' + i + '" class="' + cls + '">' +
+    tb.innerHTML = displayed.flatMap((shop) => shop.rows.map((r, i) => {
+      const selected = state === shop && state.selected === i;
+      const cls = [r.kiz ? "done" : "", selected ? "sel" : "", r.kiz && !showDone && !selected && done !== total ? "hidedone" : ""].join(" ");
+      return '<tr data-shop="' + shop.id + '" data-i="' + i + '" class="' + cls + '">' +
         '<td class="num">' + esc(r.order) + "</td>" +
         '<td class="num">' + stickerHtml(r.sticker) + "</td>" +
-        '<td class="name">' + esc(r.name) + (r.brand ? "<small>" + esc(r.brand) + "</small>" : "") + "</td>" +
+        '<td class="name">' + esc(r.name) + (loaded.length > 1 ? "<small>" + shop.label + "</small>" : "") + (r.brand ? "<small>" + esc(r.brand) + "</small>" : "") + "</td>" +
         "<td>" + esc(r.article) + "</td>" +
         '<td class="kizcell" title="' + esc(r.kiz.split(GS).join("␝")) + '">' +
           (r.kiz ? kizHtml(r.kiz) : '<span class="chip wait">ждёт КИЗ</span>') + "</td>" +
         '<td class="acts">' + (r.kiz ? '<button class="x" type="button" data-edit="' + i + '" aria-label="Изменить КИЗ" title="Изменить КИЗ">✎</button><button class="x" type="button" data-clear="' + i + '" aria-label="Удалить КИЗ" title="Удалить КИЗ">×</button>' : "") +
         '<button class="x rm" type="button" data-rm="' + i + '" aria-label="Удалить задание" title="Удалить задание (заказ отменён)">Удалить задание</button>' + "</td></tr>";
-    }).join("");
+    })).join("");
   }
 
   // ---------- UPD XML (ФНС 5.03, КНД 1115131, функция ДОП) ----------
@@ -1644,20 +1795,23 @@ body { margin: 0; }
   const RQ = ["seller", "sinn", "ogrn", "ogrnd", "saddr", "buyer", "binn", "bkpp", "baddr", "num", "date", "names"];
   let updNames = {};
   function todayStr() { const d = new Date(); return String(d.getDate()).padStart(2, "0") + "." + String(d.getMonth() + 1).padStart(2, "0") + "." + d.getFullYear(); }
+  function reqShop() { return mode === "fbo" ? shops[0] : docShop; }
+  function readReq(shop) {
+    try { return JSON.parse(localStorage.getItem(shopKey(REQ_STORE, shop)) || "{}") || {}; } catch (e) { return {}; }
+  }
   function loadReq() {
-    let r = {};
-    try { r = JSON.parse(localStorage.getItem(REQ_STORE) || "{}"); } catch (e) {}
+    const r = readReq(reqShop());
     updNames = r.namesMap || {};
-    RQ.forEach((k) => { const el = $("rq_" + k); if (el && r[k] != null) el.value = r[k]; });
-    $("rq_date").value = todayStr();
-    if (!$("rq_num").value) $("rq_num").value = defaultNum();
+    RQ.forEach((k) => { $("rq_" + k).value = r[k] ?? (k === "names" ? "wb" : ""); });
+    $("rq_date").value = r.savedOn === todayStr() && r.date ? r.date : todayStr();
+    if (!$("rq_num").value) $("rq_num").value = defaultNum() + (reqShop().id ? "-2" : "");
     showReqInfo();
   }
   function defaultNum() { const d = new Date(); return "К-" + String(d.getDate()).padStart(2, "0") + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getHours()).padStart(2, "0") + String(d.getMinutes()).padStart(2, "0"); }
   function saveReq() {
-    const r = { namesMap: updNames, t: Date.now() };
-    RQ.forEach((k) => { if (k !== "date") r[k] = $("rq_" + k).value.trim(); });
-    try { localStorage.setItem(REQ_STORE, JSON.stringify(r)); } catch (e) {}
+    const r = { namesMap: updNames, t: Date.now(), savedOn: todayStr() };
+    RQ.forEach((k) => { r[k] = $("rq_" + k).value.trim(); });
+    try { localStorage.setItem(shopKey(REQ_STORE, reqShop()), JSON.stringify(r)); } catch (e) {}
     scheduleSync();
   }
   function showReqInfo() {
@@ -1698,7 +1852,9 @@ body { margin: 0; }
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     try {
+      const target = reqShop();
       const r = parsePrevUpd(await f.arrayBuffer());
+      if (target !== reqShop()) throw new Error("Выберите исходный магазин и повторите загрузку.");
       const split = (v) => String(v || "").split("/");
       if (r.seller) $("rq_seller").value = r.seller;
       if (r.sinn) $("rq_sinn").value = split(r.sinn)[0].trim();
@@ -1828,7 +1984,7 @@ body { margin: 0; }
       });
       return [...map.values()];
     }
-    state.rows.forEach((r) => {
+    docShop.rows.forEach((r) => {
       if (!r.kiz) return;
       const k = r.article || r.name || "Без артикула";
       if (!map.has(k)) map.set(k, { article: k, name: r.name, codes: [], full: [] });
@@ -1859,6 +2015,7 @@ body { margin: 0; }
       filename = "Коды " + safe + " (" + codes.length + " шт).xlsx";
     }
     try {
+      if (mode === "fbs") filename = docShop.label + " " + filename;
       await downloads.save({ filename, data });
       note("ok", "Сохранено: " + filename + ". В СБИС откройте строку " + g.article + " → Коды → «загрузить из файла».");
     } catch (err) {
@@ -1867,7 +2024,8 @@ body { margin: 0; }
     }
   }
   function renderUpd() {
-    const groups = mode === "fbs" && state.demo ? [] : updGroups();
+    const groups = mode === "fbs" && (docShop.demo || duplicateShops().has(docShop)) ? [] : updGroups();
+    $("updheading").textContent = "Коды для УПД в СБИС" + (mode === "fbs" ? " · " + docShop.label : "");
     $("upd").hidden = !groups.length;
     $("groups").innerHTML = groups.map((g, i) =>
       '<div class="group"><div class="gh"><b>' + esc(g.article) + "</b><span>" + g.codes.length + " шт.</span></div>" +
@@ -1895,7 +2053,7 @@ body { margin: 0; }
         fbo.items.map((it) => [itemArticle(it) || ("GTIN " + it.gtin), itemName(it), kizKey(it.kiz), it.box])
           .sort((a, b) => String(a[0]).localeCompare(String(b[0]))).forEach((r) => aoa.push(r));
       } else {
-        state.rows.filter((r) => r.kiz).sort((a, b) => (a.article || "").localeCompare(b.article || ""))
+        docShop.rows.filter((r) => r.kiz).sort((a, b) => (a.article || "").localeCompare(b.article || ""))
           .forEach((r) => aoa.push([r.article, r.name, kizKey(r.kiz), r.order]));
       }
       const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -1908,7 +2066,7 @@ body { margin: 0; }
       XLSX.utils.book_append_sheet(wb, ws, "Коды маркировки");
       XLSX.utils.book_append_sheet(wb, ws2, "Итого по артикулам");
       const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-      const name = "Коды для УПД " + (mode === "fbo" ? "FBO " + stamp() : state.fileName.replace(/\.xlsx?$/i, "")) + ".xlsx";
+      const name = "Коды для УПД " + (mode === "fbo" ? "FBO " + stamp() : docShop.label + " " + docShop.fileName.replace(/\.xlsx?$/i, "")) + ".xlsx";
       if (!downloads) return fail("Скачивание недоступно в этом браузере.");
       await downloads.save({ filename: name, data: new Blob([out]) });
       note("ok", "Файл с кодами для УПД сохранён.");
@@ -1919,6 +2077,9 @@ body { margin: 0; }
   });
 
   $("rows").addEventListener("click", (e) => {
+    const owner = e.target.closest("tr[data-shop]");
+    if (!owner || shops[Number(owner.dataset.shop)].demo) return;
+    chooseScanShop(shops[Number(owner.dataset.shop)]);
     const c = e.target.closest("[data-clear]");
     if (c) { clearKiz(+c.dataset.clear); scan.focus({ preventScroll: true }); return; }
     const rm = e.target.closest("[data-rm]");
@@ -1936,18 +2097,20 @@ body { margin: 0; }
   });
 
   // ---------- file load ----------
+  const pendingImports = new Map();
   $("file").addEventListener("change", async (e) => {
     picking = false;
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     try {
+      const shop = importShop;
+      pendingImports.set(shop, f);
       const buf = await f.arrayBuffer();
-      loadBuffer(buf, f.name, null);
-      state.fileT = Date.now();
-      state.rows.forEach((r) => { if (r.kiz) state.kizT[r.r] = state.fileT; });
-      save(); render();
-      const filled = state.rows.filter((r) => r.kiz).length;
-      note("ok", "Загружено заданий: " + state.rows.length + (filled ? ", из них уже с КИЗ: " + filled : "") + ". Сканируйте первый стикер.");
+      if (pendingImports.get(shop) !== f) return;
+      importWorkbook(shop, buf, f.name);
+      render();
+      const filled = shop.rows.filter((r) => r.kiz).length;
+      note("ok", shop.label + ". Загружено заданий: " + shop.rows.length + ", с КИЗ: " + filled + ".");
     } catch (err) {
       fail(err.message || "Не удалось прочитать файл.");
     }
@@ -1955,7 +2118,7 @@ body { margin: 0; }
     scan.focus();
   });
 
-  $("kizmode").addEventListener("change", (e) => { state.kizMode = e.target.value; save(); scan.focus(); });
+  $("kizmode").addEventListener("change", (e) => { docShop.kizMode = e.target.value; save(docShop); scan.focus(); });
   function applyKbd() {
     const on = $("nokbd").checked;
     scan.inputMode = on ? "none" : "text";
@@ -1974,7 +2137,7 @@ body { margin: 0; }
   applyKbd();
   $("nokbd").addEventListener("change", () => { applyKbd(); scan.blur(); setTimeout(() => scan.focus(), 50); });
   $("undo").addEventListener("click", () => (mode === "fbo" ? fboUndo() : undo()));
-  $("removedbox").addEventListener("click", (e) => { const b = e.target.closest("[data-restore]"); if (b) restoreTask(+b.dataset.restore); });
+  $("removedbox").addEventListener("click", (e) => { const b = e.target.closest("[data-restore]"); if (b) { chooseScanShop(shops[Number(b.dataset.shop)]); restoreTask(+b.dataset.restore); } });
   $("fbodelmode").addEventListener("click", () => { setDelMode(!fboDelMode); scan.focus({ preventScroll: true }); });
   $("soundtest").addEventListener("click", () => {
     // short demo of every sound: box, barcode, KIZ, deletion, 100 pcs, FBS complete, error
@@ -2016,20 +2179,20 @@ body { margin: 0; }
     if (ws["!merges"]) ws["!merges"] = ws["!merges"].filter((m) => ![...del].some((d) => d >= m.s.r && d <= m.e.r)).map((m) => ({ s: { r: m.s.r - shift(m.s.r), c: m.s.c }, e: { r: m.e.r - shift(m.e.r), c: m.e.c } }));
   }
   function buildWbFile() {
-    const wb = XLSX.read(b64ToBuf(state.b64), { type: "array" });
-    const ws = wb.Sheets[state.sheetName];
-    state.rows.forEach((r) => {
-      const addr = XLSX.utils.encode_cell({ r: r.r, c: state.cols.kiz });
-      const val = !r.kiz ? "" : state.kizMode === "short" ? kizKey(r.kiz) : state.kizMode === "nogs" ? normKiz(r.kiz) : withGS(r.kiz);
+    const wb = XLSX.read(b64ToBuf(docShop.b64), { type: "array" });
+    const ws = wb.Sheets[docShop.sheetName];
+    docShop.rows.forEach((r) => {
+      const addr = XLSX.utils.encode_cell({ r: r.r, c: docShop.cols.kiz });
+      const val = !r.kiz ? "" : docShop.kizMode === "short" ? kizKey(r.kiz) : docShop.kizMode === "nogs" ? normKiz(r.kiz) : withGS(r.kiz);
       if (val) ws[addr] = { t: "s", v: val };
       else delete ws[addr];
     });
     const range = XLSX.utils.decode_range(ws["!ref"]);
-    range.e.c = Math.max(range.e.c, state.cols.kiz);
+    range.e.c = Math.max(range.e.c, docShop.cols.kiz);
     ws["!ref"] = XLSX.utils.encode_range(range);
-    deleteSheetRows(ws, Object.keys(state.removed || {}).filter((k) => state.removed[k].on).map(Number));
+    deleteSheetRows(ws, Object.keys(docShop.removed || {}).filter((k) => docShop.removed[k].on).map(Number));
     const out = fixGsEscapes(XLSX.write(wb, { bookType: "xlsx", type: "array" }));
-    return { name: state.fileName.replace(/\.xlsx?$/i, "") + ".xlsx", out };
+    return { name: docShop.label + " " + docShop.fileName.replace(/\.xlsx?$/i, "") + ".xlsx", out };
   }
   $("export").addEventListener("click", async () => {
     try {
@@ -2097,45 +2260,69 @@ body { margin: 0; }
     if (!res.ok) throw new Error("GitHub ответил " + res.status + ".");
     return res.json();
   }
-  function localDoc() {
-    const req = (() => { try { return JSON.parse(localStorage.getItem(REQ_STORE) || "{}"); } catch (e) { return {}; } })();
+  function shopDoc(shop) {
+    if (shop.demo) return null;
     const kiz = {};
-    if (!state.demo) (state.allRows || state.rows).forEach((r) => { if (r.kiz || state.kizT[r.r]) kiz[r.r] = { v: r.kiz || "", t: state.kizT[r.r] || 1 }; });
+    shop.allRows.forEach((r) => { if (r.kiz || shop.kizT[r.r]) kiz[r.r] = { v: r.kiz || "", t: shop.kizT[r.r] || 1 }; });
+    const { fileId, fileName, b64, removed } = shop;
+    return { fileId, fileT: shop.fileT || 1, fileName, b64, kiz, removed };
+  }
+  function localDoc() {
     return {
-      v: 1,
-      fbs: state.demo ? null : { fileId: state.fileId, fileT: state.fileT || 1, fileName: state.fileName, b64: state.b64, kiz, removed: state.removed || {} },
+      v: 1, fbs: shopDoc(shops[0]),
       fbo: { epoch: fbo.epoch, del: fbo.del, items: fbo.items.map((it) => ({ kiz: it.kiz, box: it.box, gtin: it.gtin, barcode: it.barcode || "", t: it.t || 1, ...(it.boxT ? { boxT: it.boxT } : {}) })) },
-      gtin: gtinMap, bc: bcMap, boxnum: boxNumMap, req
+      gtin: gtinMap, bc: bcMap, boxnum: boxNumMap, req: readReq(shops[0]),
+      second: { fbs: shopDoc(shops[1]), req: readReq(shops[1]) }
     };
+  }
+  function mergeShop(shop, remote) {
+    if (!remote?.b64) return;
+    function mergeEdits(target, row, code, t, removal) {
+      const localT = target.kizT[row.r] || 0, value = normKiz(code);
+      const change = t > localT || (t && t === localT && value > row.kiz);
+      if (change) { row.kiz = value; target.kizT[row.r] = t; }
+      const old = target.removed[row.r];
+      const removed = removal && (!old || removal.t > old.t || (removal.t === old.t && removal.on && !old.on));
+      if (removed) target.removed[row.r] = removal;
+      return change || removed;
+    }
+    const remoteT = remote.fileT || 1, localT = shop.fileT || 1;
+    if (!shop.demo && remote.fileId === shop.fileId) {
+      let changed = false;
+      for (const row of shop.allRows) {
+        const entry = remote.kiz?.[row.r];
+        if (mergeEdits(shop, row, entry?.v, entry?.t || 0, remote.removed?.[row.r])) changed = true;
+      }
+      shop.fileT = Math.max(localT, remoteT);
+      if (changed) { shop.selected = null; shop.history = []; applyRemoved(shop); }
+      return;
+    }
+    const codes = {}, times = {};
+    for (const [r, e] of Object.entries(remote.kiz || {})) { codes[r] = e.v; times[r] = e.t || 1; }
+    const incoming = Object.assign(parseWorkbook(b64ToBuf(remote.b64), remote.fileName, codes), {
+      fileId: remote.fileId, fileT: remoteT, kizT: times, removed: Object.assign({}, remote.removed)
+    });
+    const newer = shop.demo || remoteT > localT || (remoteT === localT && remote.fileId > shop.fileId);
+    const target = newer ? incoming : shop, source = newer ? shop : incoming;
+    let changed = false;
+    // A second device may have scanned an existing sticker while the first refreshed its workbook.
+    forMatchingRows(target, source, (row, old) => {
+      if (mergeEdits(target, row, old.kiz, source.kizT[old.r] || 0, source.removed[old.r])) changed = true;
+    });
+    if (newer) Object.assign(shop, incoming);
+    if (newer || changed) { shop.selected = null; shop.history = []; applyRemoved(shop); }
+  }
+  function mergeReq(shop, remote) {
+    if (!remote || (remote.t || 0) <= (readReq(shop).t || 0)) return;
+    localStorage.setItem(shopKey(REQ_STORE, shop), JSON.stringify(remote));
+    if (reqShop() === shop) loadReq();
   }
   function mergeRemote(R) {
     if (!R || R.v !== 1) return;
     applyingRemote = true;
     try {
-      // FBS
-      if (R.fbs && R.fbs.b64) {
-        const sameFile = !state.demo && R.fbs.fileId === state.fileId;
-        const rT = R.fbs.fileT || 1, lT = state.fileT || 1;
-        // newer file wins; equal times (files loaded before sync existed) are decided the same way on every device
-        if (!sameFile && (state.demo || rT > lT || (rT === lT && String(R.fbs.fileId) > String(state.fileId)))) {
-          const kizOv = {}, kizT = {};
-          Object.keys(R.fbs.kiz || {}).forEach((r) => { kizOv[r] = R.fbs.kiz[r].v; kizT[r] = R.fbs.kiz[r].t; });
-          loadBuffer(b64ToBuf(R.fbs.b64), R.fbs.fileName, kizOv);
-          state.kizT = kizT; state.fileT = R.fbs.fileT; state.fileId = R.fbs.fileId;
-          state.removed = R.fbs.removed || {}; applyRemoved();
-        } else if (sameFile) {
-          Object.keys(R.fbs.kiz || {}).forEach((r) => {
-            const e = R.fbs.kiz[r], row = (state.allRows || state.rows).find((x) => String(x.r) === String(r));
-            if (row && (e.t || 0) > (state.kizT[row.r] || 0)) { row.kiz = normKiz(e.v); state.kizT[row.r] = e.t; if (row.kiz) learnGtin(row.kiz, row.article, row.name); }
-          });
-          let ch = false;
-          Object.keys(R.fbs.removed || {}).forEach((r) => {
-            const e = R.fbs.removed[r], l = (state.removed || {})[r];
-            if (!l || (e.t || 0) > (l.t || 0)) { if (!state.removed) state.removed = {}; state.removed[r] = e; ch = true; }
-          });
-          if (ch) { state.selected = null; state.history = []; applyRemoved(); }
-        }
-      }
+      mergeShop(shops[0], R.fbs);
+      mergeShop(shops[1], R.second?.fbs);
       // FBO
       if (R.fbo) {
         if ((R.fbo.epoch || 0) > fbo.epoch) {
@@ -2167,11 +2354,9 @@ body { margin: 0; }
       Object.keys(R.gtin || {}).forEach((g) => { const r = R.gtin[g], l = gtinMap[g]; gtinMap[g] = l && (r.t || 0) > (l.t || 0) ? Object.assign({}, l, r) : Object.assign({}, r, l || {}); });
       Object.keys(R.bc || {}).forEach((b) => { const r = R.bc[b], l = bcMap[b]; if (!l || (r.t || 0) > (l.t || 0)) bcMap[b] = r; });
       Object.keys(R.boxnum || {}).forEach((b) => { if ((R.boxnum[b].t || 0) > ((boxNumMap[b] || {}).t || 0)) boxNumMap[b] = R.boxnum[b]; });
-      // requisites: newer wins
-      let lr = {};
-      try { lr = JSON.parse(localStorage.getItem(REQ_STORE) || "{}"); } catch (e) {}
-      if (R.req && (R.req.t || 0) > (lr.t || 0)) { try { localStorage.setItem(REQ_STORE, JSON.stringify(R.req)); } catch (e) {} loadReq(); }
-      save(); saveFbo(); saveGtin();
+      mergeReq(shops[0], R.req);
+      mergeReq(shops[1], R.second?.req);
+      shops.forEach((shop) => save(shop)); saveFbo(); saveGtin();
     } finally { applyingRemote = false; }
   }
   let lastResolve = 0;
@@ -2192,11 +2377,17 @@ body { margin: 0; }
     if (syncCfg.gist !== found[0].id) { syncCfg.gist = found[0].id; saveSyncCfg(); lastRemote = ""; }
     return found[0].id;
   }
+  // Older clients only update GIST_FILE. Keep the second shop in its own file in the same gist.
+  const SECOND_FILE = "kiz-shop2.json";
+  function gistFiles(doc) {
+    const { second, ...legacy } = doc;
+    return { [GIST_FILE]: { content: JSON.stringify(legacy) }, [SECOND_FILE]: { content: JSON.stringify(second) } };
+  }
   async function findOrCreateGist() {
     if (syncCfg.gist && Date.now() - lastResolve < 60000) return syncCfg.gist;
     const id = await resolveGists();
     if (id) return id;
-    const created = await gh("/gists", { method: "POST", body: JSON.stringify({ description: GIST_DESC, public: false, files: { [GIST_FILE]: { content: JSON.stringify(localDoc()) } } }) });
+    const created = await gh("/gists", { method: "POST", body: JSON.stringify({ description: GIST_DESC, public: false, files: gistFiles(localDoc()) }) });
     syncCfg.gist = created.id; saveSyncCfg();
     return created.id;
   }
@@ -2204,9 +2395,14 @@ body { margin: 0; }
     const g = await gh("/gists/" + id + "?t=" + Date.now(), { cache: "no-store" });
     const f = g.files && g.files[GIST_FILE];
     if (!f) return null;
-    let text = f.content;
-    if (f.truncated && f.raw_url) text = await (await fetch(f.raw_url, { cache: "no-store" })).text();
-    try { return JSON.parse(text); } catch (e) { throw new Error("Не удалось прочитать данные синхронизации с GitHub, попробую ещё раз."); }
+    async function readFile(file) {
+      let text = file.content;
+      if (file.truncated && file.raw_url) text = await (await fetch(file.raw_url, { cache: "no-store" })).text();
+      try { return JSON.parse(text); } catch (e) { throw new Error("Не удалось прочитать данные синхронизации с GitHub, попробую ещё раз."); }
+    }
+    const doc = await readFile(f);
+    if (g.files[SECOND_FILE]) doc.second = await readFile(g.files[SECOND_FILE]);
+    return doc;
   }
   let lastPatch = 0, blockedUntil = 0;
   const PATCH_GAP = 20000; // at most one upload every 20 s: GitHub limits how often content may be changed
@@ -2222,7 +2418,7 @@ body { margin: 0; }
       const remoteText = R ? JSON.stringify(R) : "";
       if (R && remoteText !== lastRemote) { mergeRemote(R); render(); }
       lastRemote = remoteText;
-      const mine = JSON.stringify(localDoc());
+      const doc = localDoc(), mine = JSON.stringify(doc);
       if (mine !== remoteText) {
         const wait = PATCH_GAP - (Date.now() - lastPatch);
         if (wait > 0) {
@@ -2232,7 +2428,7 @@ body { margin: 0; }
           return;
         }
         lastPatch = Date.now();
-        await gh("/gists/" + id, { method: "PATCH", body: JSON.stringify({ files: { [GIST_FILE]: { content: mine } } }) });
+        await gh("/gists/" + id, { method: "PATCH", body: JSON.stringify({ files: gistFiles(doc) }) });
         lastRemote = mine;
       }
       lastSyncAt = Date.now();
@@ -2291,7 +2487,6 @@ body { margin: 0; }
     const now = Date.now();
     if (v === lastVal && now - lastAt < 3000) return;
     lastVal = v; lastAt = now;
-    const before = $("msg").textContent + "|" + state.selected;
     process(v);
     
     const f = $("camflash"); f.classList.add("on"); setTimeout(() => f.classList.remove("on"), 60);
@@ -2371,7 +2566,8 @@ body { margin: 0; }
 
   // ---------- boot ----------
   loadReq();
-  if (!restore()) { state.rows = DEMO_ROWS.map((r) => Object.assign({}, r)); }
+  shops.forEach(restore);
+  if (shops.every((s) => s.demo)) shops[0].rows = DEMO_ROWS.map((r) => Object.assign({}, r));
   render();
   if (!matchMedia("(pointer: coarse)").matches) $("optsbox").open = true;
   initSync();
