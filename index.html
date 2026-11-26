@@ -395,6 +395,17 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
   border-radius: 7px; background: var(--bg); color: var(--ink); font: inherit; font-size: 15px; }
 .ozswitch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; }
 .ozswitch select { max-width: 100%; min-height: 44px; padding: 4px 8px; font: inherit; }
+#ozarticletable { max-height: 16rem; overflow: auto; }
+#ozarticletable table { width: 100%; min-width: 0; border-collapse: collapse; }
+#ozarticletable :is(th,td) { padding: 6px 5px; text-align: right; font-variant-numeric: tabular-nums; }
+#ozarticletable tr > :first-child { text-align: left; overflow-wrap: anywhere; }
+#ozarticletable thead { display: table-header-group; }
+#ozarticletable tbody tr { display: table-row; cursor: default; }
+#ozarticletable tbody th { font: inherit; color: var(--ink); text-transform: none; letter-spacing: normal; }
+body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
+#ozlookup { min-height: 44px; }
+#ozlookup[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+#ozmissinglist { max-height: 10rem; overflow: auto; overflow-wrap: anywhere; }
 #ozrecent { display: grid; gap: 5px; margin: 6px 0 0; padding-left: 20px; overflow-wrap: anywhere; }
 @media (max-width: 640px) {
   header .modes, body[data-mode="fbs"] header .modes { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); }
@@ -483,7 +494,13 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
     </div>
     <button type="button" class="focushint" id="focushint" hidden>Сканер сейчас не попадает на страницу. Нажмите сюда, затем сканируйте.</button>
     <div class="lastscan" id="lastscan" hidden></div>
+    <div class="ozbar ozonly" id="ozlookupbar" hidden><button type="button" id="ozlookup" aria-pressed="false">Поиск по скану</button>
+      <button type="button" id="ozauditreset" hidden>Начать проверку заново</button></div>
     <div class="step" id="step"></div>
+    <div class="ozonly" id="ozaudit" hidden>
+      <strong id="ozauditprogress"></strong>
+      <details id="ozmissing" hidden><summary>Коды без учёта</summary><ul id="ozmissinglist"></ul></details>
+    </div>
     <label id="fbomovepicker" class="fboonly" hidden>Короб назначения
       <select id="fbomovebox"></select>
     </label>
@@ -501,6 +518,10 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
 
   <section class="ozpanel ozonly" id="ozsummary" hidden>
     <div class="ozbar"><strong id="ozcount"></strong><button id="ozchange" type="button">Сменить товар</button></div>
+    <details open><summary id="ozarticleslabel">Артикулы</summary>
+      <div id="ozarticletable"><table><thead><tr><th scope="col">Артикул</th><th scope="col" id="ozarticleboxhead">В коробе</th><th scope="col">В поставке</th></tr></thead>
+        <tbody id="ozarticlebody"></tbody></table></div>
+    </details>
     <details><summary id="ozlistlabel">Последние экземпляры</summary><ol id="ozrecent"></ol></details>
     <span class="file">Сборка сохраняется на этом устройстве.</span>
   </section>
@@ -1766,16 +1787,23 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
     flashTimer = setTimeout(() => { f.classList.remove("show"); }, kind === "err" ? 1400 : kind === "ok" ? 650 : 500);
   }
   let ac = null;
+  function enableScanAudio() {
+    if (!$("sound").checked) return;
+    try {
+      ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+      if (ac.state === "suspended") ac.resume().catch(() => {});
+    } catch (e) {}
+  }
   // kinds: true / "kiz" — KIZ saved; false — error; "box" — box; "barcode" — barcode; "del" — deleted; "hundred" — every 100 pcs; "complete" — all FBS orders packed
   function beep(kind) {
     const ok = kind !== false;
     // vibration helps in a noisy warehouse (phones only)
-    const vib = { box: [60, 60, 60], hundred: [120, 80, 120, 80, 300], complete: [120, 80, 120, 80, 400], del: [40, 60, 40] }[kind] || (ok ? 80 : [250, 100, 250, 100, 250]);
+    const vib = { lookupFound: 65, lookupMissing: [170,90,170], box: [60, 60, 60], hundred: [120, 80, 120, 80, 300], complete: [120, 80, 120, 80, 400], del: [40, 60, 40] }[kind] || (ok ? 80 : [250, 100, 250, 100, 250]);
     try { if (navigator.vibrate) navigator.vibrate(vib); } catch (e) {}
     if (!$("sound").checked) return;
     try {
-      ac = ac || new (window.AudioContext || window.webkitAudioContext)();
-      if (ac.state === "suspended") ac.resume();
+      enableScanAudio();
+      if (!ac) return;
       // master chain: loud but without clipping distortion
       const comp = ac.createDynamicsCompressor();
       comp.threshold.value = -6; comp.ratio.value = 4;
@@ -1791,7 +1819,11 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
         g.gain.linearRampToValueAtTime(0.0001, at + d);
         o.connect(g); g.connect(comp); o.start(at); o.stop(at + d + 0.02);
       };
-      if (kind === "box") {
+      if (kind === "lookupFound") {
+        tone(2000,0,0.14,"sine");
+      } else if (kind === "lookupMissing") {
+        tone(380,0,0.16,"square"); tone(300,0.24,0.20,"square");
+      } else if (kind === "box") {
         // new box: rising three-note chime, lower and softer than a scan
         tone(660, 0, 0.12, "triangle");
         tone(880, 0.14, 0.12, "triangle");
@@ -2671,6 +2703,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
     setTimeout(camLoop, 150);
   }
   async function openCam() {
+    enableScanAudio();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fail("Этот браузер не даёт доступ к камере. Откройте приложение в Chrome.");
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
@@ -3107,13 +3140,144 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
       const item = { r, ref: prototype.r, box: data.box, barcode: data.barcode, article, expiry, type: prototype.type, qr };
       return { ...eventEdit("q:" + key,scanFields(item)), items: [...data.items, item] };
     }
+    // A check is local to this browser tab. It never writes a stock movement or a marking record.
+    const auditKey = "kiz-ozon-scan-check";
+    let audit = null;
+    try { audit = JSON.parse(sessionStorage.getItem(auditKey)); } catch (e) {}
+    function saveAudit() {
+      try { if (audit) sessionStorage.setItem(auditKey,JSON.stringify(audit)); else sessionStorage.removeItem(auditKey); } catch (e) {}
+    }
+    function inventory(space) {
+      const counts = kind === "counts";
+      const contents = counts ? countedRows().filter((r) => r.qty > 0) : template.rows.concat(data.items).filter((r) => r.qr);
+      const qrRows = new Map(), marks = new Map(), products = new Map(), articles = new Map();
+      const assigned = new Map();
+      if (!counts) {
+        const id = supplyId();
+        for (const [,m] of activeMarks(space)) {
+          if (m.supply !== id) continue;
+          const qr = qrKey(m.qr);
+          assigned.set(qr,m);
+          if (!marks.has(m.identity)) marks.set(m.identity,new Set());
+          marks.get(m.identity).add(qr);
+        }
+      }
+      for (const r of contents) {
+        const qr = r.qr && qrKey(r.qr), mark = qr && assigned.get(qr);
+        const barcode = r.barcode || mark?.barcode || "";
+        const article = r.article || mark?.article || space.catalog[barcodeKey(barcode)]?.article || "";
+        const qty = counts ? r.qty : 1;
+        const key = article ? "a:" + article : barcodeKey(barcode);
+        if (!articles.has(key)) articles.set(key,{ article, label:article || ("ШК " + (barcode || "не указан")), total:0, box:0 });
+        const group = articles.get(key);
+        group.total += qty;
+        if (r.box === data.box) group.box += qty;
+        if (barcode) {
+          const bc = barcodeKey(barcode);
+          if (!products.has(bc)) products.set(bc,new Set());
+          products.get(bc).add(group);
+        }
+        if (qr) qrRows.set(qr,{ qr, article:group.label, box:r.box, mark });
+      }
+      return { articles, products, qrRows, marks, catalog:space.catalog };
+    }
+    function showArticles(view) {
+      const rows = [...view.articles.values()].sort((a,b) => b.total - a.total || a.label.localeCompare(b.label,"ru"));
+      const known = rows.filter((r) => r.article).length;
+      const unknown = rows.length - known;
+      $("ozarticleslabel").textContent = "Артикулов: " + known + (unknown ? " · без артикула: " + unknown : "");
+      $("ozarticleboxhead").hidden = !data.box;
+      $("ozarticlebody").innerHTML = rows.map((r) => "<tr><th scope=\"row\">" + esc(r.label) + "</th>" +
+        (data.box ? "<td>" + r.box + "</td>" : "") + "<td>" + r.total + "</td></tr>").join("");
+      $("ozarticletable").hidden = !rows.length;
+    }
+    function lookup(value,view) {
+      const qr = qrKey(value), identity = markingIdentity(value);
+      if (kind === "pieces") {
+        let unit = view.qrRows.get(qr);
+        if (!unit && identity) {
+          const links = view.marks.get(identity);
+          if (links?.size > 1) return { state:"attention", title:"КИЗ связан с несколькими QR", detail:"Проверьте привязки в списке КИЗ." };
+          if (links?.size) unit = view.qrRows.get(links.values().next().value);
+        }
+        if (unit) return { state:"found", key:unit.qr, title:"Уже учтено", detail:unit.article + " · короб " + unit.box + (!unit.mark ? " · КИЗ не привязан" : "") };
+        if (data.waitQr && qrKey(data.waitQr) === qr)
+          return { state:"pending", key:qr, title:"Сборка не завершена", detail:"QR считан. Чтобы учесть экземпляр, вернитесь к сборке и сканируйте его КИЗ." };
+      }
+      if (template.boxes.has(value)) return { state:"info", title:"Грузоместо", detail:value + " · " +
+        (kind === "counts" ? countedRows().filter((r) => r.box === value).reduce((s,r) => s + Number(r.qty || 0),0) : countBox(value)) + " шт." };
+      const bc = barcodeKey(value), byArticle = view.articles.get("a:" + value);
+      const groups = view.products.get(bc) || (byArticle ? new Set([byArticle]) : null);
+      if (groups || view.catalog[bc]) {
+        const detail = groups ? [...groups].map((r) => r.label + " · " + r.total + " шт. в поставке").join(", ") : view.catalog[bc].article + " · 0 шт. в поставке";
+        return { state:"info", title:"Количество по товару", detail:detail + (kind === "pieces" ? ". Для проверки одной вещи сканируйте QR Ozon или КИЗ." : ".") };
+      }
+      if (kind === "counts") return { state:"info", title:"Нет записей по этому коду", detail:"Для этого шаблона поиск работает по штрихкоду товара или артикулу." };
+      return { state:"missing", key:identity || qr, title:identity ? "КИЗ не найден" : "Код не найден", detail:"В текущей поставке нет записи для этого кода." + (identity ? " Проверьте также QR Ozon на этой вещи." : "") };
+    }
+    function showAudit(view, announce) {
+      const found = new Set(), missing = new Map();
+      for (const value of audit.codes) {
+        const hit = lookup(value,view);
+        if (hit.state === "found") found.add(hit.key);
+        if (hit.state === "missing" || hit.state === "pending") missing.set(hit.key,value);
+      }
+      const pieces = kind === "pieces";
+      $("ozauditprogress").hidden = !pieces;
+      $("ozauditprogress").textContent = "Проверено экземпляров: " + found.size + " из " + view.qrRows.size + " · кодов без учёта: " + missing.size;
+      $("ozauditreset").hidden = !pieces || !audit.codes.length;
+      $("ozmissing").hidden = !missing.size;
+      $("ozmissinglist").replaceChildren(...[...missing.values()].map((v) => { const li = document.createElement("li"); li.textContent = v.replaceAll(GS,"␝"); return li; }));
+      scan.placeholder = pieces ? "Проверка QR, КИЗ или штрихкода" : "Поиск по штрихкоду товара";
+      const step = $("step"); step.className = "step";
+      step.innerHTML = '<div class="badge" aria-hidden="true">⌕</div><div class="title">Поиск по скану</div><div class="sub">' +
+        (pieces ? "Сканируйте QR Ozon или КИЗ каждой вещи. Проверочные сканы не прибавляют штуки." : "Штрихкод покажет учтённое количество товара в поставке.") + "</div>";
+      if (!audit.last) { hideMsg(); camUpdate(); return; }
+      const hit = lookup(audit.last,view);
+      const status = hit.state === "found" ? "ok" : hit.state === "missing" ? "err" : "warn";
+      note(status,hit.title + ". " + hit.detail);
+      if (announce) {
+        beep(hit.state === "found" ? "lookupFound" : status === "err" || hit.state === "pending" ? "lookupMissing" : "barcode");
+        flash(status,hit.state === "found" ? "✓" : status === "err" ? "×" : "•",hit.title,hit.detail);
+      }
+      camUpdate();
+    }
+    $("ozlookup").addEventListener("click",() => run(() => {
+      if (!data || pending) return;
+      enableScanAudio();
+      if (audit) audit.active = !audit.active;
+      else audit = { supply:supplyId(), kind, active:true, codes:[], last:"" };
+      saveAudit(); scan.value = ""; resetBuf(); clearTimeout(autoTimer); lastVal = "";
+      $("lastscan").hidden = true; hideMsg(); renderStation(); focusScan();
+    }));
+    $("ozauditreset").addEventListener("click",() => {
+      if (!audit?.active) return;
+      audit.codes = []; audit.last = ""; saveAudit(); lastVal = "";
+      $("lastscan").hidden = true; renderStation(); focusScan();
+    });
     function processScan(v) {
       run(() => {
         if (!data) throw Error("Сначала загрузите шаблон Ozon.");
         if (pending) throw Error("Сначала подтвердите или отмените замену шаблона.");
+        if (audit?.active) {
+          const view = inventory(workspace()), hit = lookup(v,view);
+          if (["found","missing","pending"].includes(hit.state) && !audit.codes.includes(v)) audit.codes.push(v);
+          audit.last = v; saveAudit(); showAudit(view,true); return;
+        }
         if (template.boxes.has(v)) return chooseBox(v);
         if (!data.box) throw Error("Выберите или сканируйте грузоместо из шаблона.");
         if (kind === "counts") return addCount(v);
+        const supply = supplyId(), identity = markingIdentity(v), qr = qrKey(v);
+        const matches = activeMarks(workspace()).filter(([,m]) => (identity && m.identity === identity) || qrKey(m.qr) === qr);
+        const mark = matches.find(([,m]) => m.supply === supply) || matches[0];
+        // At the QR step an imported unit can still receive its first marking code.
+        const knownUnit = mark?.[1] || ((!data.barcode || data.waitQr) &&
+          template.rows.concat(data.items).find((r) => r.qr && qrKey(r.qr) === qr));
+        if (knownUnit) {
+          const detail = (knownUnit.article || knownUnit.barcode || "Экземпляр") + " · короб " + knownUnit.box;
+          const title = mark && mark[1].supply !== supply ? "Уже учтено в другой поставке" : "Уже учтено";
+          note("warn",title + ". Код уже сохранён: " + detail); beep("lookupFound"); flash("warn","✓",title,detail); return;
+        }
         if (!data.barcode) return chooseProduct(v);
         if (data.waitQr) return finishPiece(v);
         captureQr(v);
@@ -3183,6 +3347,14 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
       const counts = kind === "counts";
       $("title").textContent = "Ozon · состав грузомест";
       const space = workspace();
+      if (audit && (!data || audit.kind !== kind || audit.supply !== supplyId())) { audit = null; saveAudit(); hideMsg(); }
+      $("ozlookupbar").hidden = !data;
+      $("ozlookup").disabled = !!pending;
+      const checking = !!audit?.active;
+      $("ozlookup").textContent = checking ? "Вернуться к сборке" : "Поиск по скану";
+      $("ozlookup").setAttribute("aria-pressed",String(checking));
+      $("ozaudit").hidden = !checking;
+      $("ozauditreset").hidden = !checking || !audit.codes.length;
       renderRegister(space);
       $("ozcardcount").textContent = "Штрихкодов в справочнике: " + Object.keys(space.catalog).length;
       $("ozswitchlabel").hidden = !data || !space[counts ? "pieces" : "counts"];
@@ -3198,7 +3370,9 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
       $("ozreplace").hidden = !pending;
       const barcode = data?.barcode || "";
       $("ozartlabel").hidden = $("ozdates").hidden = $("ozchange").disabled = !barcode;
-      $("ozchange").hidden = counts;
+      $("ozchange").hidden = counts || checking;
+      if (checking) $("undo").disabled = true;
+      $("ozarticle").disabled = $("ozdate").disabled = $("ozzone").disabled = $("ozbox").disabled = checking;
       $("ozzonelabel").hidden = !counts;
       $("ozdetailslabel").textContent = counts ? "Зона и срок годности" : "Срок годности";
       $("ozlistlabel").textContent = counts ? "Товары в грузоместе" : "Последние экземпляры";
@@ -3217,6 +3391,10 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
         $("ozcount").textContent = "Всего " + total + " шт." + (data.box ? " · в грузоместе " + (counts ? sum(inBox) : countBox(data.box)) : "");
         const recent = counts ? [] : template.rows.filter((r) => r.qr).concat(data.items).slice(-10).reverse();
         $("ozrecent").innerHTML = counts ? inBox.map((r) => "<li>" + esc(r.article || r.barcode) + " · " + r.qty + " шт.</li>").join("") : recent.map((r) => "<li>" + esc(r.article || r.barcode) + ' · <span class="mono">' + kizHtml(r.qr) + "</span></li>").join("");
+      }
+      if (data) {
+        const view = inventory(space); showArticles(view);
+        if (checking) { showAudit(view,false); return; }
       }
       if (counts && data?.box) {
         scan.placeholder = "Штрихкод товара";
@@ -3514,7 +3692,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
       const space = workspace(), preferred = localStorage.getItem(preference) === "counts" ? "counts" : "pieces";
       restoreStation(space[preferred] ? preferred : space.pieces ? "pieces" : space.counts ? "counts" : preferred,space);
     } catch (e) { if (mode === "ozon") fail("Не удалось открыть сохранённую сборку Ozon."); }
-    return { render: renderStation, scan: processScan, undo: undoScan, counting: () => kind === "counts", outgoing, mergeCloud };
+    return { render: renderStation, scan: processScan, undo: undoScan, counting: () => kind === "counts" || !!audit?.active, outgoing, mergeCloud };
   }
 
   // ---------- boot ----------
