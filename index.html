@@ -3158,8 +3158,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
       $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); focusScan(); } });
     }
 
-    // Patch only the cargo worksheet in the original OOXML package. Ozon's instruction sheet,
-    // number formats, column widths and all other workbook parts remain intact.
+    // Keep the original package and use indexed strings on the cargo sheet, as in Ozon's templates.
     function filledWorkbook() {
       const zip = XLSX.CFB.read(new Uint8Array(b64ToBuf(data.b64)), { type: "array" });
       function xmlPart(path) {
@@ -3169,15 +3168,26 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
         if (doc.getElementsByTagName("parsererror").length) throw Error("Не удалось прочитать XML шаблона.");
         return { entry, doc };
       }
-      const rels = xmlPart("xl/_rels/workbook.xml.rels").doc;
+      function saveXml(part) {
+        part.entry.content = new TextEncoder().encode(new XMLSerializer().serializeToString(part.doc));
+        part.entry.size = part.entry.content.length;
+      }
+      const workbookRels = xmlPart("xl/_rels/workbook.xml.rels");
+      const rels = workbookRels.doc;
+      function partPath(rel) {
+        const target = new URL(rel.getAttribute("Target"), "https://workbook.invalid/xl/workbook.xml");
+        return decodeURIComponent(target.pathname.slice(1));
+      }
       const rel = [...rels.getElementsByTagNameNS("*","Relationship")].find((r) => r.getAttribute("Id") === template.sheetId);
       if (!rel) throw Error("Не найден лист состава грузомест.");
-      const target = new URL(rel.getAttribute("Target"), "https://workbook.invalid/xl/workbook.xml");
-      const { entry, doc } = xmlPart(decodeURIComponent(target.pathname.slice(1)));
+      const worksheet = xmlPart(partPath(rel));
+      const doc = worksheet.doc;
       const ns = doc.documentElement.namespaceURI;
       const body = doc.getElementsByTagNameNS(ns,"sheetData")[0];
       const create = (name) => doc.createElementNS(ns, body.prefix ? body.prefix + ":" + name : name);
       const rows = new Map([...body.children].map((el) => [Number(el.getAttribute("r")) - 1, el]));
+      const sharedCount = () => [...body.getElementsByTagNameNS(ns,"c")].filter((cell) => cell.getAttribute("t") === "s").length;
+      const originalSharedCount = sharedCount();
       function cellText(cell, value) {
         // OOXML escapes forbidden control characters and protects literal escape sequences.
         const encoded = String(value).replace(/_x[0-9a-f]{4}_/gi, (m) => "_x005F_" + m.slice(1))
@@ -3215,7 +3225,65 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !
       }
       const dim = doc.getElementsByTagNameNS(ns,"dimension")[0];
       if (dim) dim.setAttribute("ref",XLSX.utils.encode_range({s:template.range.s,e:{r:last,c:template.range.e.c}}));
-      entry.content = new TextEncoder().encode(new XMLSerializer().serializeToString(doc)); entry.size = entry.content.length;
+      // Ozon reads QR codes and barcodes through the shared string table. Include old exports
+      // reopened for download, even when the operator hasn't added a scan since importing them.
+      const inlineCells = [...body.getElementsByTagNameNS(ns,"c")].filter((cell) => cell.getAttribute("t") === "inlineStr");
+      if (inlineCells.length || sharedCount() !== originalSharedCount) {
+        const relationships = [...rels.documentElement.children];
+        const sharedRel = relationships.find((r) => r.getAttribute("Type")?.endsWith("/sharedStrings"));
+        let strings;
+        if (sharedRel) strings = xmlPart(partPath(sharedRel));
+        else {
+          const path = "xl/sharedStrings.xml";
+          const table = doc.implementation.createDocument(ns,"sst",null);
+          const entry = XLSX.CFB.utils.cfb_add(zip,path,new Uint8Array());
+          strings = { entry, doc: table };
+          const root = rels.documentElement;
+          const link = rels.createElementNS(root.namespaceURI,"Relationship");
+          let id = "OzonStrings";
+          while (relationships.some((r) => r.getAttribute("Id") === id)) id += "_";
+          link.setAttribute("Id",id); link.setAttribute("Target","sharedStrings.xml");
+          link.setAttribute("Type",rel.getAttribute("Type").replace(/worksheet$/,"sharedStrings"));
+          root.append(link); saveXml(workbookRels);
+          const types = xmlPart("[Content_Types].xml");
+          const override = types.doc.createElementNS(types.doc.documentElement.namespaceURI,"Override");
+          override.setAttribute("PartName","/" + path);
+          override.setAttribute("ContentType","application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml");
+          types.doc.documentElement.append(override); saveXml(types);
+        }
+        const root = strings.doc.documentElement;
+        const existing = [...root.getElementsByTagNameNS(ns,"si")];
+        const index = new Map();
+        function plainText(node) {
+          const first = node.firstElementChild;
+          return first?.localName === "t" && node.childElementCount === 1 ? first.textContent : null;
+        }
+        existing.forEach((si,i) => { const text = plainText(si); if (text !== null) index.set(text,i); });
+        const extension = [...root.children].find((c) => c.localName === "extLst") || null;
+        let size = existing.length;
+        for (const cell of inlineCells) {
+          const inline = cell.getElementsByTagNameNS(ns,"is")[0];
+          if (!inline) continue;
+          const text = plainText(inline);
+          let i = text === null ? undefined : index.get(text);
+          if (i === undefined) {
+            const si = strings.doc.createElementNS(ns,root.prefix ? root.prefix + ":si" : "si");
+            for (const child of inline.childNodes) si.append(strings.doc.importNode(child,true));
+            root.insertBefore(si,extension);
+            i = size++;
+            if (text !== null) index.set(text,i);
+          }
+          const v = create("v"); v.textContent = String(i);
+          cell.replaceChildren(v); cell.setAttribute("t","s");
+        }
+        if (root.hasAttribute("count")) {
+          const change = sharedCount() - originalSharedCount;
+          root.setAttribute("count",String(Number(root.getAttribute("count")) + change));
+        }
+        if (root.hasAttribute("uniqueCount")) root.setAttribute("uniqueCount",String(size));
+        saveXml(strings);
+      }
+      saveXml(worksheet);
       return XLSX.CFB.write(zip, { fileType:"zip", type:"array", compression:true });
     }
     $("ozexport").addEventListener("click", async () => {
