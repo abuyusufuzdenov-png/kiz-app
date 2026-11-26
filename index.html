@@ -3543,6 +3543,37 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         renderStation(); note("ok","Загружено соответствий: " + pairs.size + "."); focusScan();
       } catch (err) { fail(err.message || "Не удалось загрузить карточки Ozon."); }
     });
+    // Export one product identifier per unit, including units already present in the imported file.
+    function pieceExportRows(space) {
+      const rows = new Map(template.rows.map((r) => [r.r,r]));
+      for (const item of data.items) rows.set(item.r,item);
+      const units = new Set([...rows.values()].filter((r) => r.qr).map((r) => qrKey(r.qr)));
+      const marks = new Map(activeMarks(space).filter(([,m]) => m.supply === supplyId()).map(([,m]) => [qrKey(m.qr),m]));
+      const productId = (v) => v && !units.has(qrKey(v)) && !isOzonUnitLabel(v) ? v : "";
+      const products = [], articlesByBarcode = new Map();
+      for (const row of rows.values()) {
+        if (!row.qr && !row.barcode && !row.article) continue;
+        const mark = row.qr && marks.get(qrKey(row.qr));
+        const barcode = productId(row.barcode) || productId(mark?.barcode);
+        const article = productId(row.article) || productId(mark?.article);
+        const key = barcodeKey(barcode);
+        products.push({ row,barcode,article,key });
+        if (barcode && article) {
+          if (!articlesByBarcode.has(key)) articlesByBarcode.set(key,new Set());
+          articlesByBarcode.get(key).add(article);
+        }
+      }
+      return products.map(({row,barcode,article,key}) => {
+        const known = articlesByBarcode.get(key);
+        const catalogArticle = barcode && productId(space.catalog[key]?.article);
+        // If the same barcode is paired with different articles, identify it by barcode on every row.
+        const ambiguous = known && (known.size > 1 || (catalogArticle && !known.has(catalogArticle)));
+        const offer = ambiguous ? "" : article || catalogArticle || known?.values().next().value || "";
+        if (!offer && !barcode) throw Error("Строка " + (row.r + 1) + ": для QR " + (row.qr || "—") +
+          " отсутствует артикул или штрихкод товара. Проверьте эту строку в исходном Excel.");
+        return { ...row, ref:row.ref ?? row.r, barcode:offer ? "" : barcode, article:offer };
+      });
+    }
     // Keep the original package and use indexed strings on the cargo sheet, as in Ozon's templates.
     function filledWorkbook() {
       const zip = XLSX.CFB.read(new Uint8Array(b64ToBuf(data.b64)), { type: "array" });
@@ -3583,17 +3614,8 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       }
       const originals = new Map(template.rows.map((r) => [r.r, r]));
       let last = template.range.e.r;
-      const edits = new Map(data.items.map((item) => [item.r,item]));
-      if (kind === "pieces") {
-        const marks = new Map(activeMarks(workspace()).map(([,m]) => [qrKey(m.qr),m]));
-        for (const row of template.rows.concat(data.items)) {
-          if (!row.qr || row.article) continue;
-          const m = marks.get(qrKey(row.qr));
-          if (m && m.box === row.box && (!row.barcode || barcodeKey(row.barcode) === barcodeKey(m.barcode)))
-            edits.set(row.r,{ ...row, ref:row.ref ?? row.r, article:m.article, barcode:row.barcode || m.barcode });
-        }
-      }
-      for (const item of [...edits.values()].sort((a,b) => a.r-b.r)) {
+      const edits = kind === "pieces" ? pieceExportRows(workspace()) : data.items;
+      for (const item of [...edits].sort((a,b) => a.r-b.r)) {
         let row = rows.get(item.r);
         if (!row) {
           row = rows.get(item.ref).cloneNode(false); row.setAttribute("r", item.r + 1);
@@ -3601,9 +3623,14 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         }
         const orig = originals.get(item.r);
         for (const [field, col] of Object.entries(template.cols)) {
-          if (orig && orig[field] === item[field]) continue;
+          const emptyIdentifier = kind === "pieces" && (field === "barcode" || field === "article") && !item[field];
+          if (!emptyIdentifier && orig && orig[field] === item[field]) continue;
           const addr = XLSX.utils.encode_cell({ r:item.r, c:col });
           let cell = [...row.children].find((c) => c.getAttribute("r") === addr);
+          if (emptyIdentifier) {
+            if (cell) { cell.replaceChildren(); cell.removeAttribute("t"); }
+            continue;
+          }
           if (!cell) {
             const styleCell = [...rows.get(item.ref).children].find((c) => c.getAttribute("r") === XLSX.utils.encode_cell({r:item.ref,c:col}));
             cell = create("c"); cell.setAttribute("r",addr);
