@@ -327,7 +327,82 @@ body { margin: 0; }
 .shopdocs { scroll-margin-top: 160px; }
 .shopdocs label { display: grid; gap: 4px; min-width: 0; max-width: 100%; color: var(--muted); font-size: 13px; }
 .shopdocs label select { width: 100%; color: var(--ink); }
-@media (max-width: 640px) { .shopdocs { scroll-margin-top: 10px; } }
+.shopmeta { display: grid; gap: 4px; min-width: 0; }
+@media (max-width: 640px) {
+  body[data-mode="fbs"] header { display: block; position: relative; }
+  body[data-mode="fbs"] header .actions { display: contents; }
+  body[data-mode="fbs"] header #title { padding-right: 48px; }
+  body[data-mode="fbs"] header .modes { display: flex; margin: 8px 0 0; }
+  body[data-mode="fbs"] header .modes button { flex: 1; min-height: 40px; justify-content: center; }
+  body[data-mode="fbs"] header :is(#fileinfo, .progress), body[data-mode="fbs"] #undo:disabled { display: none; }
+  body[data-mode="fbs"] #undo { position: absolute; top: 0; right: 0; width: 44px; height: 44px; font-size: 0; }
+  body[data-mode="fbs"] #undo::before { content: "↶" / ""; font-size: 24px; line-height: 1; }
+
+  .shopgrid { grid-template-columns: minmax(0, 1fr); gap: 0; border: 1px solid var(--line);
+    border-radius: 12px; background: var(--panel); }
+  .shopcard { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center;
+    padding: 8px 10px 8px 12px; border: 0; border-radius: 0; background: transparent; }
+  .shopcard + .shopcard { border-top: 1px solid var(--line); }
+  .shopmeta { gap: 1px; }
+  .shopmeta .file { font-size: 12px; }
+  .shopmeta .filename { direction: rtl; text-align: left; }
+  .shopgrid[data-loaded="1"] .shopcount, .shopcard.empty .file { display: none; }
+  .shopcard .gbtns { margin: 0; align-items: center; justify-content: end; }
+  .shopcard button { min-height: 44px; padding: 6px 9px; }
+  .shopcard [data-docs] { background: var(--accent-soft); }
+
+  .fbs-meter { padding: 2px 2px 4px; }
+  .meter-numbers { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; justify-content: space-between;
+    margin-bottom: 7px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .meter-numbers strong { font-size: 17px; color: var(--ink); }
+  .meter-numbers .complete { color: var(--ok); font-weight: 600; }
+  .station .step.complete { display: block; padding: 0 2px; background: transparent; }
+  .station .step.complete :is(.badge, .title) { display: none; }
+  .fbs-meter progress { display: block; appearance: none; width: 100%; height: 5px; border: 0;
+    border-radius: 6px; overflow: hidden; color: var(--ink); background: var(--line); }
+  .fbs-meter progress::-webkit-progress-bar { background: var(--line); }
+  .fbs-meter progress::-webkit-progress-value { background: var(--ink); }
+  .fbs-meter progress::-moz-progress-bar { background: var(--ink); }
+  body[data-mode="fbs"] .step.complete { display: none; }
+  body[data-mode="fbs"] .scope { justify-content: space-between; font-weight: 600; }
+  body[data-mode="fbs"] #scope { min-height: 44px; }
+  body[data-mode="fbs"] .scanrow #scan { font-size: 16px; min-height: 48px; padding: 8px 10px; }
+  body[data-mode="fbs"] .scanrow button { justify-content: center; min-width: 44px; }
+
+  .tablebox.fbsonly table, #rows { display: block; width: 100%; }
+  #rows tr { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; }
+  #rows td { min-width: 0; overflow-wrap: anywhere; }
+  #rows .num { white-space: normal; line-height: 1.25; }
+  #rows .num + .num { text-align: right; }
+  #rows .num::before { display: block; margin-bottom: 2px; font: 12px/1.3 var(--font-body); color: var(--muted); }
+  #rows .num:first-child::before { content: "Задание"; }
+  #rows .num:nth-child(2)::before { content: "Стикер"; }
+  #rows td:nth-child(n+3) { grid-column: 1 / -1; }
+  #rows .name { font-weight: 600; }
+  #rows .name small { font-weight: 400; }
+  #rows .acts { display: flex; flex-wrap: wrap; gap: 6px; }
+  #rows .acts button { min-width: 44px; min-height: 44px; margin: 0; padding: 4px 10px; justify-content: center; }
+  .shopdocs { scroll-margin-top: 10px; }
+}
+body:not([data-mode="ozon"]) .ozonly,
+body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { display: none !important; }
+.ozpanel { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.ozbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ozbar strong { margin-right: auto; }
+.ozfields { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit,minmax(min(200px,100%),1fr)); }
+.ozfields label { display: grid; gap: 3px; min-width: 0; color: var(--muted); font-size: 13px; }
+.ozfields :is(select,input) { width: 100%; min-width: 0; min-height: 42px; padding: 6px 8px; border: 1px solid var(--line);
+  border-radius: 7px; background: var(--bg); color: var(--ink); font: inherit; font-size: 15px; }
+#ozrecent { display: grid; gap: 5px; margin: 6px 0 0; padding-left: 20px; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  header .modes, body[data-mode="fbs"] header .modes { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); }
+  header > div:first-child { width: 100%; min-width: 0; }
+  header .modes button { min-width: 0; padding: 8px 3px; justify-content: center; }
+  body[data-mode="ozon"] #undo:disabled { display: none; }
+  body[data-mode="ozon"] header .actions:has(#undo:disabled) { display: none; }
+  .ozpanel { padding: 10px; gap: 8px; }
+  .ozbar button { min-height: 44px; }
+}
 </style>
 </head>
 <body>
@@ -341,6 +416,7 @@ body { margin: 0; }
       <div class="modes" role="tablist">
         <button type="button" role="tab" data-mode="fbs">Сборка FBS</button>
         <button type="button" role="tab" data-mode="fbo">Поставка FBO</button>
+        <button type="button" role="tab" data-mode="ozon">Ozon</button>
       </div>
       <div class="file" id="fileinfo">Пример. Загрузите файл sgtin из кабинета WB</div>
     </div>
@@ -353,12 +429,38 @@ body { margin: 0; }
     </div>
   </header>
 
+  <section class="ozpanel ozonly" aria-label="Шаблон Ozon">
+    <div class="ozbar">
+      <strong>Состав грузомест</strong>
+      <button id="ozload" type="button">Загрузить шаблон</button>
+      <button id="ozexport" class="primary" type="button" disabled>Скачать Excel</button>
+      <input id="ozfile" type="file" class="vh" tabindex="-1" accept=".xlsx">
+    </div>
+    <div class="confirm" id="ozreplace" hidden>Открыть другой шаблон вместо текущей сборки?
+      <button id="ozyes" type="button">Открыть новый</button><button id="ozno" type="button">Отмена</button>
+    </div>
+    <div id="ozcontrols" hidden>
+      <div class="ozfields">
+        <label>Грузоместо<select id="ozbox"></select></label>
+        <label id="ozartlabel" hidden>Артикул товара<input id="ozarticle" autocomplete="off"></label>
+      </div>
+      <details id="ozdates" hidden><summary>Срок годности</summary><div class="ozfields"><label>Годен до<input type="date" id="ozdate"></label></div></details>
+    </div>
+  </section>
+
   <section class="shopgrid fbsonly" id="shops" aria-label="Сборочные задания магазинов"></section>
   <div class="msg err fbsonly" id="storagewarn" role="alert" hidden></div>
   <div class="demo fbsonly" id="demo">Сейчас на странице пример из трёх выдуманных заданий. Загрузите свой файл template-sgtin, чтобы начать работу.</div>
 
   <div class="bigstat mobonly" id="bigstat"></div>
   <section class="station" aria-live="polite">
+    <label class="scope fbsonly" id="scopelabel" hidden>Сборка
+      <select id="scope"><option value="all">Все магазины</option><option value="0">Магазин 1</option><option value="1">Магазин 2</option></select>
+    </label>
+    <div class="fbs-meter fbsonly mobonly" id="fbsmeter" hidden>
+      <div class="meter-numbers"><strong id="fbsdone"></strong><span id="fbsleft"></span></div>
+      <progress id="fbsmeterbar" aria-label="Прогресс сборки"></progress>
+    </div>
     <div class="scanrow">
       <input id="scan" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
         placeholder="Сканируйте стикер или КИЗ, либо введите цифры стикера + Enter" aria-label="Поле сканера">
@@ -383,6 +485,11 @@ body { margin: 0; }
     </details>
   </section>
 
+  <section class="ozpanel ozonly" id="ozsummary" hidden>
+    <div class="ozbar"><strong id="ozcount"></strong><button id="ozchange" type="button">Сменить товар</button></div>
+    <details><summary>Последние экземпляры</summary><ol id="ozrecent"></ol></details>
+    <span class="file">Сборка сохраняется на этом устройстве.</span>
+  </section>
   <section class="fbo fboonly" id="fbo">
     <div class="fbohead">
       <div>
@@ -415,9 +522,6 @@ body { margin: 0; }
     </details>
   </section>
 
-  <label class="scope fbsonly" id="scopelabel" hidden>Сборка
-    <select id="scope"><option value="all">Все магазины</option><option value="0">Магазин 1</option><option value="1">Магазин 2</option></select>
-  </label>
   <button type="button" class="donetoggle fbsonly mobonly" id="donetoggle" hidden></button>
   <div class="tablebox fbsonly">
     <table>
@@ -582,12 +686,13 @@ body { margin: 0; }
 
   // ---------- mode (FBS / FBO) ----------
   let mode = "fbs";
-  try { if (localStorage.getItem("kiz-mode") === "fbo") mode = "fbo"; } catch (e) {}
+  try { const saved = localStorage.getItem("kiz-mode"); if (["fbo", "ozon"].includes(saved)) mode = saved; } catch (e) {}
   function setMode(m) {
     if (m !== "fbo") moveTarget = null;
     if (typeof fboDelMode !== "undefined" && fboDelMode && m !== "fbo") { fboDelMode = false; $("fbodelmode").classList.remove("armed"); $("fbodelmode").textContent = "Удалить КИЗ сканом"; }
+    scan.value = ""; resetBuf(); clearTimeout(autoTimer); $("lastscan").hidden = true;
     mode = m;
-    loadReq();
+    if (m !== "ozon") loadReq();
     try { localStorage.setItem("kiz-mode", m); } catch (e) {}
     hideMsg(); render();
     scan.focus({ preventScroll: true });
@@ -1349,6 +1454,7 @@ body { margin: 0; }
   })();
   scan.addEventListener("input", () => {
     if (!scan.value) { resetBuf(); return; }
+    if (mode === "ozon" && (pasted || !$("layoutfix").checked)) return;
     if (/[\u0400-\u04ff№]/.test(scan.value)) {
       const pos = scan.selectionStart;
       scan.value = scan.value.replace(/[\u0400-\u04ff№]/g, (c) => RU2EN[c] ?? "");
@@ -1370,7 +1476,7 @@ body { margin: 0; }
     if (e.key && e.key.length === 1) {
       evbuf.push({ key: e.key, ev: { code: e.code, shiftKey: e.shiftKey, getModifierState: () => !!(e.getModifierState && e.getModifierState("CapsLock")) } });
       // keep the field Latin-only: a Cyrillic char is replaced right away by the Latin key on the same physical button
-      if (/[^\x00-\x7f]/.test(e.key)) {
+      if ((mode !== "ozon" || $("layoutfix").checked) && /[^\x00-\x7f]/.test(e.key)) {
         const ch = charFromCode(e) ?? RU2EN[e.key];
         if (ch != null) { e.preventDefault(); insert(ch); kick(); }
       }
@@ -1472,6 +1578,7 @@ body { margin: 0; }
     const ls = $("lastscan");
     ls.innerHTML = 'Последний скан: <span class="mono">' + kizHtml(v) + "</span> (" + v.length + " симв.)";
     ls.hidden = false;
+    if (mode === "ozon") return ozon.scan(v);
     if (mode === "fbo") return processFbo(v);
     if (!visibleShops().length) return fail("Загрузите Excel с заданиями из кабинета WB в карточку магазина.");
     if (isKiz(v)) return assignKiz(v);
@@ -1711,7 +1818,9 @@ body { margin: 0; }
     document.body.dataset.mode = mode;
     $("undo").textContent = mode === "fbo" && fbo.lastMove ? "Отменить перенос" : "Отменить последний";
     document.querySelectorAll(".modes [data-mode]").forEach((b) => b.setAttribute("aria-selected", b.dataset.mode === mode ? "true" : "false"));
-    scan.placeholder = mode === "fbo" ? "QR короба → баркод товара → КИЗ" : "Сканируйте стикер или КИЗ, либо введите цифры стикера + Enter";
+    $("undo").title = $("undo").textContent;
+    scan.placeholder = mode === "fbo" ? "QR короба → баркод товара → КИЗ" : "Стикер или КИЗ";
+    if (mode === "ozon") return ozon.render();
     if (mode === "fbo") return renderFbo();
     $("title").textContent = "Сборка FBS: КИЗ по стикеру";
     renderFbs();
@@ -1729,19 +1838,25 @@ body { margin: 0; }
       '<div class="rrow"><span>' + shop.label + " · " + esc(rowLabel(r)) + " · стикер " + esc(r.sticker) + " · " + esc(r.article || "") + (r.kiz ? " · с КИЗ" : "") + '</span><button type="button" data-shop="' + shop.id + '" data-restore="' + r.r + '">Вернуть</button></div>').join("") : "";
     const rows = displayed.flatMap((shop) => shop.rows);
     const done = rows.filter((r) => r.kiz).length, total = rows.length;
+    $("shops").dataset.loaded = loaded.length;
     $("shops").innerHTML = shops.map((shop) => {
       const filled = shop.rows.filter((r) => r.kiz).length;
-      return '<article class="shopcard" data-shop="' + shop.id + '"><strong>' + shop.label + '</strong>' +
-        '<span class="file" title="' + esc(shop.fileName) + '">' + (shop.demo ? "Нет задания" : esc(shop.fileName)) + '</span>' +
-        (shop.demo ? "" : '<span class="file">Собрано ' + filled + ' из ' + shop.rows.length + '</span>') +
-        '<div class="gbtns"><button type="button" data-pick>' + (shop.demo ? 'Загрузить Excel' : 'Обновить') + '</button>' +
+      return '<article class="shopcard' + (shop.demo ? " empty" : "") + '" data-shop="' + shop.id + '"><div class="shopmeta"><strong>' + shop.label + '</strong>' +
+        '<span class="file filename" title="' + esc(shop.fileName) + '">' + (shop.demo ? "Нет задания" : "<bdi>" + esc(shop.fileName) + "</bdi>") + '</span>' +
+        (shop.demo ? "" : '<span class="file shopcount">Собрано ' + filled + ' из ' + shop.rows.length + '</span>') +
+        '</div><div class="gbtns"><button type="button" data-pick>' + (shop.demo ? 'Загрузить Excel' : 'Обновить') + '</button>' +
         (shop.demo ? "" : '<button type="button" data-docs>Файлы</button>') + '</div></article>';
     }).join("");
     $("scopelabel").hidden = loaded.length < 2;
     $("scope").value = scope;
-    $("bigstat").innerHTML = demo ? "" : '<div class="nums"><div><div class="big' + (done === total ? " done" : "") + '">' + (total - done) + '</div><div class="lbl">осталось собрать</div></div>' +
-      '<div class="right"><div class="big done">' + done + '</div><div class="lbl">из ' + total + " готово</div></div></div>";
-    $("bigstat").hidden = demo;
+    $("bigstat").hidden = true; // FBO uses this panel for its box counters.
+    const complete = !demo && total > 0 && done === total;
+    $("fbsmeter").hidden = demo;
+    $("fbsdone").textContent = "Собрано " + done + " из " + total;
+    $("fbsleft").textContent = complete ? "✓ Готово" : "Осталось " + (total - done);
+    $("fbsleft").classList.toggle("complete", complete);
+    $("fbsmeterbar").max = Math.max(1, total);
+    $("fbsmeterbar").value = done;
     $("donetoggle").hidden = demo || !done || done === total;
     $("donetoggle").textContent = showDone ? "Скрыть собранные (" + done + ")" : "Показать собранные (" + done + ")";
     $("count").textContent = done + " / " + total;
@@ -1762,10 +1877,14 @@ body { margin: 0; }
     $("undo").disabled = !latestUndoShop();
 
     const step = $("step");
-    if (state.selected == null) {
+    if (state.selected == null && complete) {
+      step.className = "step complete";
+      step.innerHTML = '<div class="badge">✓</div><div class="title">Сборка завершена</div>' +
+        '<div class="sub">Excel для WB и УПД доступны по кнопке «Файлы» у магазина.</div>';
+    } else if (state.selected == null) {
       step.className = "step";
       step.innerHTML = '<div class="badge">1</div><div class="title">Сканируйте стикер заказа</div>' +
-        '<div class="sub">Строка с этим заданием подсветится, после этого сканируйте КИЗ.</div>';
+        '<div class="sub">Затем отсканируйте КИЗ товара.</div>';
     } else {
       const r = state.rows[state.selected];
       step.className = "step kiz";
@@ -2136,7 +2255,7 @@ body { margin: 0; }
   });
   applyKbd();
   $("nokbd").addEventListener("change", () => { applyKbd(); scan.blur(); setTimeout(() => scan.focus(), 50); });
-  $("undo").addEventListener("click", () => (mode === "fbo" ? fboUndo() : undo()));
+  $("undo").addEventListener("click", () => { if (mode === "ozon") ozon.undo(); else if (mode === "fbo") fboUndo(); else undo(); });
   $("removedbox").addEventListener("click", (e) => { const b = e.target.closest("[data-restore]"); if (b) { chooseScanShop(shops[Number(b.dataset.shop)]); restoreTask(+b.dataset.restore); } });
   $("fbodelmode").addEventListener("click", () => { setDelMode(!fboDelMode); scan.focus({ preventScroll: true }); });
   $("soundtest").addEventListener("click", () => {
@@ -2564,7 +2683,273 @@ body { margin: 0; }
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
   }
 
+  // ---------- Ozon cargo units ----------
+  function createOzonStation() {
+    const storageKey = "kiz-ozon-cargo-v1";
+    let data = null, template = null, stored = null, pending = null, importSequence = 0;
+    function readTemplate(buf) {
+      const wb = XLSX.read(buf, { type: "array" });
+      const sheet = wb.Workbook.Sheets.find((s) => s.name.trim().toLowerCase() === "состав грузомест");
+      if (!sheet) throw Error("В Excel нужен лист «Состав грузомест» из шаблона Ozon.");
+      const ws = wb.Sheets[sheet.name];
+      const fields = ["barcode","article","expiry","box","type","qr"];
+      const headers = ["штрихкод товара","артикул товара","годен до","штрихкод грузоместа","тип грузоместа","qr-код"];
+      const rows = [], cols = {}, boxes = new Map();
+      const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+      let header = -1;
+      for (let r = range.s.r; r <= Math.min(range.e.r, range.s.r + 20); r++) {
+        const found = {};
+        for (let c = range.s.c; c <= range.e.c; c++) {
+          const label = String(ws[XLSX.utils.encode_cell({ r, c })]?.v || "").trim().toLowerCase().replace(/[‑–—]/g, "-");
+          const i = headers.findIndex((h) => label === h || label.startsWith(h + " ("));
+          if (i >= 0) found[fields[i]] = c;
+        }
+        if (fields.every((key) => key in found)) { Object.assign(cols, found); header = r; break; }
+      }
+      if (header < 0) throw Error("В шаблоне не найдены шесть колонок состава грузомест Ozon.");
+      for (let r = header + 1; r <= range.e.r; r++) {
+        const row = { r };
+        for (const key of fields) {
+          const cell = ws[XLSX.utils.encode_cell({ r, c: cols[key] })];
+          if (cell?.t === "n" && ["box","barcode","qr"].includes(key) && !Number.isSafeInteger(cell.v))
+            throw Error("Excel округлил числовой код в строке " + (r + 1) + ". Загрузите исходный шаблон Ozon с текстовым штрихкодом.");
+          if (key === "expiry" && cell?.t === "n") row[key] = XLSX.SSF.format("yyyy-mm-dd",cell.v);
+          else row[key] = String(cell?.v ?? "");
+        }
+        if (!row.box && fields.some((k) => row[k])) throw Error("В строке " + (r + 1) + " отсутствует штрихкод грузоместа.");
+        if (!row.box) continue;
+        rows.push(row);
+        if (!boxes.has(row.box)) boxes.set(row.box, []);
+        boxes.get(row.box).push(row);
+      }
+      if (!boxes.size) throw Error("В шаблоне нет грузомест. Создайте их в заявке Ozon и скачайте шаблон.");
+      const keys = new Set();
+      for (const row of rows.filter((r) => r.qr)) {
+        const key = qrKey(row.qr);
+        if (keys.has(key)) throw Error("В исходном шаблоне повторяется QR-код, строка " + (row.r + 1) + ".");
+        keys.add(key);
+      }
+      return { rows, boxes, cols, sheetId: sheet.id, range };
+    }
+    function qrKey(qr) { return qr.replace(/\x1d/g, ""); }
+    function restoreStation() {
+      const raw = localStorage.getItem(storageKey);
+      const saved = raw ? JSON.parse(raw) : null;
+      const parsed = saved ? readTemplate(b64ToBuf(saved.b64)) : null;
+      data = saved; template = parsed; stored = raw;
+    }
+    function commit(next) {
+      if (localStorage.getItem(storageKey) !== stored) {
+        restoreStation(); renderStation();
+        throw Error("Сборка изменилась в другой вкладке. Проверьте грузоместо и повторите действие.");
+      }
+      const raw = JSON.stringify(next);
+      try { localStorage.setItem(storageKey, raw); }
+      catch (err) { throw Error("Не удалось сохранить изменение на устройстве. Скачайте текущий Excel."); }
+      stored = raw; data = next;
+    }
+    function resetProduct() { return { barcode: "", article: "", expiry: "" }; }
+    function focusScan() { scan.focus({ preventScroll: true }); }
+    function run(action) { try { action(); } catch (e) { fail(e.message || "Не удалось изменить сборку."); } }
+    function chooseBox(box) {
+      if (!template?.boxes.has(box)) return;
+      commit({ ...data, box, ...resetProduct() }); hideMsg(); renderStation(); focusScan();
+    }
+    function chooseProduct(barcode) {
+      if (/^01\d{14}21/.test(barcode) || /^https?:\/\//i.test(barcode) || barcode.includes(GS))
+        throw Error("Сначала сканируйте штрихкод товара, затем уникальный QR-код экземпляра.");
+      const group = template.boxes.get(data.box);
+      const candidates = group.concat(data.items.filter((r) => r.box === data.box));
+      const known = candidates.filter((r) => r.barcode === barcode);
+      const available = group.find((r) => r.barcode === barcode && !r.qr && !data.items.some((i) => i.r === r.r));
+      const ref = available || known[known.length - 1] || template.rows.concat(data.items).find((r) => r.barcode === barcode);
+      commit({ ...data, barcode, article: ref?.article || "", expiry: ref?.expiry || "" });
+      hideMsg(); renderStation(); beep("barcode");
+    }
+    function record(qr) {
+      if (qr.length > 32767) throw Error("QR-код слишком длинный для ячейки Excel.");
+      if (qr === data.barcode || template.rows.concat(data.items).some((r) => r.barcode === qr))
+        throw Error("Считан штрихкод товара. Для другого товара нажмите «Сменить товар», для текущего сканируйте QR-код экземпляра.");
+      const key = qrKey(qr);
+      if (template.rows.concat(data.items).some((r) => r.qr && qrKey(r.qr) === key))
+        throw Error("Этот QR-код уже записан в поставке.");
+      const group = template.boxes.get(data.box);
+      const used = new Set(data.items.map((r) => r.r));
+      const remaining = group.filter((r) => !r.qr && !used.has(r.r));
+      const matches = (r) => (!r.barcode || r.barcode === data.barcode) && (!r.article || !data.article || r.article === data.article);
+      const blank = (r) => !r.barcode && !r.article && !r.qr;
+      const target = remaining.find((r) => !blank(r) && matches(r) && (r.barcode === data.barcode || r.article === data.article))
+        || remaining.find(blank);
+
+      const article = data.article || target?.article || "";
+      const expiry = data.expiry || target?.expiry || "";
+      if (target?.expiry && expiry !== target.expiry) throw Error("Срок годности отличается от указанного в шаблоне.");
+      const previous = group.concat(data.items.filter((r) => r.box === data.box));
+      if (expiry && previous.some((r) => r.barcode === data.barcode && r.expiry && r.expiry !== expiry))
+        throw Error("Для одного товара с разными сроками годности выберите разные грузоместа.");
+      if (expiry && group.concat(data.items).some((item) => item.box === data.box && item.expiry && item.expiry !== expiry &&
+          ((item.barcode && item.barcode === data.barcode) || (article && item.article === article))))
+        throw Error("Для этого товара с другим сроком годности выберите отдельное грузоместо.");
+      const r = target?.r ?? (data.items.reduce((last, item) => Math.max(last, item.r), template.range.e.r) + 1);
+      if (r > 1048575) throw Error("В листе Excel закончились строки.");
+      const prototype = target || group.find(blank) || group[0];
+      const item = { r, ref: prototype.r, box: data.box, barcode: data.barcode, article, expiry, type: prototype.type, qr };
+      commit({ ...data, items: [...data.items, item] });
+      renderStation(); beep("kiz"); note("ok", "QR-код записан. Сканируйте следующий экземпляр.");
+      flash("ok", "✓", article || data.barcode, "В грузоместе " + countBox(data.box) + " шт.");
+    }
+    function processScan(v) {
+      run(() => {
+        if (!data) throw Error("Сначала загрузите шаблон Ozon.");
+        if (pending) throw Error("Сначала подтвердите или отмените замену шаблона.");
+        if (template.boxes.has(v)) return chooseBox(v);
+        if (!data.box) throw Error("Выберите или сканируйте грузоместо из шаблона.");
+        if (!data.barcode) return chooseProduct(v);
+        record(v);
+      });
+    }
+    function countBox(box) {
+      return (template.boxes.get(box) || []).filter((r) => r.qr).length + data.items.filter((r) => r.box === box).length;
+    }
+    function renderStation() {
+      if (mode !== "ozon") return;
+      $("title").textContent = "Ozon · состав грузомест";
+      $("fileinfo").textContent = data?.fileName || "Заполнение шаблона поставки";
+      $("undo").disabled = !data?.items.length;
+      $("ozcontrols").hidden = $("ozsummary").hidden = !data;
+      $("ozreplace").hidden = !pending;
+      const barcode = data?.barcode || "";
+      $("ozartlabel").hidden = $("ozdates").hidden = $("ozchange").disabled = !barcode;
+      const total = data ? template.rows.filter((r) => r.qr).length + data.items.length : 0;
+      $("ozexport").disabled = !total;
+      if (data) {
+        $("ozbox").replaceChildren(new Option("Выберите грузоместо", ""), ...[...template.boxes.keys()].map((box) => new Option(box,box)));
+        $("ozbox").firstElementChild.disabled = true;
+        $("ozbox").value = data.box;
+        if (document.activeElement !== $("ozarticle")) $("ozarticle").value = data.article;
+        if (document.activeElement !== $("ozdate")) $("ozdate").value = data.expiry;
+        $("ozcount").textContent = "Всего " + total + " шт." + (data.box ? " · в грузоместе " + countBox(data.box) : "");
+        const recent = template.rows.filter((r) => r.qr).concat(data.items).slice(-10).reverse();
+        $("ozrecent").innerHTML = recent.map((r) => "<li>" + esc(r.article || r.barcode) + ' · <span class="mono">' + kizHtml(r.qr) + "</span></li>").join("");
+      }
+      const title = !data ? "Загрузите шаблон Ozon" : !data.box ? "Выберите грузоместо" : !barcode ? "Сканируйте штрихкод товара" : "Сканируйте QR-код экземпляра";
+      scan.placeholder = !data ? "Загрузите шаблон Ozon" : !data.box ? "Штрихкод грузоместа" : barcode ? "QR-код экземпляра" : "Штрихкод товара";
+      $("step").className = barcode ? "step kiz" : "step";
+      const hint = !data ? "Выберите Excel с листом «Состав грузомест»." : !data.box ? "Сканируйте этикетку короба или выберите его из списка." : !barcode ?
+        "Для одинаковых товаров штрихкод достаточно считать один раз." : (data.article || barcode) + " · " + data.box;
+      $("step").innerHTML = '<div class="badge">' + (barcode ? "2" : "1") + '</div><div class="title">' + title + '</div><div class="sub">' + esc(hint) + "</div>";
+    }
+    function undoScan() {
+      run(() => {
+        if (!data?.items.length) return;
+        commit({ ...data, items: data.items.slice(0,-1) }); renderStation();
+        note("warn","Последний QR-код удалён из шаблона."); focusScan();
+      });
+    }
+    function installPending() {
+      const incoming = pending;
+      if (!incoming) return;
+      commit(incoming.data); template = incoming.template; pending = null;
+      renderStation(); hideMsg(); focusScan();
+    }
+    $("ozload").addEventListener("click", () => $("ozfile").click());
+    $("ozfile").addEventListener("change", async (e) => {
+      const f = e.target.files[0]; e.target.value = "";
+      if (!f) return;
+      try {
+        const currentImport = ++importSequence; pending = null; renderStation();
+        const buf = await f.arrayBuffer();
+        if (currentImport !== importSequence) return;
+        const b64 = bufToB64(buf);
+        if (data?.b64 === b64) { pending = null; renderStation(); note("ok","Этот шаблон уже открыт. Сканирование можно продолжить."); return; }
+        const parsed = readTemplate(buf), boxes = [...parsed.boxes.keys()];
+        pending = { template: parsed, data: { fileName: f.name, b64, items: [], box: boxes.length === 1 ? boxes[0] : "", ...resetProduct() } };
+        if (data?.items.length) renderStation(); else installPending();
+      } catch (err) { fail(err.message || "Не удалось прочитать Excel."); }
+    });
+    $("ozyes").addEventListener("click", () => run(installPending));
+    $("ozno").addEventListener("click", () => { pending = null; renderStation(); focusScan(); });
+    $("ozbox").addEventListener("change", (e) => run(() => chooseBox(e.target.value)));
+    $("ozchange").addEventListener("click", () => run(() => chooseBox(data.box)));
+    for (const [id, field] of [["ozarticle","article"],["ozdate","expiry"]]) {
+      $(id).addEventListener("change", (e) => run(() => { commit({ ...data, [field]: e.target.value.trim() }); renderStation(); }));
+      $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); focusScan(); } });
+    }
+
+    // Patch only the cargo worksheet in the original OOXML package. Ozon's instruction sheet,
+    // number formats, column widths and all other workbook parts remain intact.
+    function filledWorkbook() {
+      const zip = XLSX.CFB.read(new Uint8Array(b64ToBuf(data.b64)), { type: "array" });
+      function xmlPart(path) {
+        const entry = XLSX.CFB.find(zip, "/" + path);
+        if (!entry) throw Error("В файле нет части " + path);
+        const doc = new DOMParser().parseFromString(new TextDecoder("utf-8").decode(entry.content),"application/xml");
+        if (doc.getElementsByTagName("parsererror").length) throw Error("Не удалось прочитать XML шаблона.");
+        return { entry, doc };
+      }
+      const rels = xmlPart("xl/_rels/workbook.xml.rels").doc;
+      const rel = [...rels.getElementsByTagNameNS("*","Relationship")].find((r) => r.getAttribute("Id") === template.sheetId);
+      if (!rel) throw Error("Не найден лист состава грузомест.");
+      const target = new URL(rel.getAttribute("Target"), "https://workbook.invalid/xl/workbook.xml");
+      const { entry, doc } = xmlPart(decodeURIComponent(target.pathname.slice(1)));
+      const ns = doc.documentElement.namespaceURI;
+      const body = doc.getElementsByTagNameNS(ns,"sheetData")[0];
+      const create = (name) => doc.createElementNS(ns, body.prefix ? body.prefix + ":" + name : name);
+      const rows = new Map([...body.children].map((el) => [Number(el.getAttribute("r")) - 1, el]));
+      function cellText(cell, value) {
+        // OOXML escapes forbidden control characters and protects literal escape sequences.
+        const encoded = String(value).replace(/_x[0-9a-f]{4}_/gi, (m) => "_x005F_" + m.slice(1))
+          .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, (ch) => "_x" + ch.charCodeAt(0).toString(16).toUpperCase().padStart(4,"0") + "_");
+        const inline = create("is"), t = create("t"); t.textContent = encoded;
+        t.setAttributeNS("http://www.w3.org/XML/1998/namespace","xml:space","preserve");
+        inline.append(t); cell.replaceChildren(inline); cell.setAttribute("t","inlineStr");
+      }
+      const originals = new Map(template.rows.map((r) => [r.r, r]));
+      let last = template.range.e.r;
+      for (const item of data.items) {
+        let row = rows.get(item.r);
+        if (!row) {
+          row = rows.get(item.ref).cloneNode(false); row.setAttribute("r", item.r + 1);
+          body.append(row); rows.set(item.r, row);
+        }
+        const orig = originals.get(item.r);
+        for (const [field, col] of Object.entries(template.cols)) {
+          if (orig && orig[field] === item[field]) continue;
+          const addr = XLSX.utils.encode_cell({ r:item.r, c:col });
+          let cell = [...row.children].find((c) => c.getAttribute("r") === addr);
+          if (!cell) {
+            const styleCell = [...rows.get(item.ref).children].find((c) => c.getAttribute("r") === XLSX.utils.encode_cell({r:item.ref,c:col}));
+            cell = create("c"); cell.setAttribute("r",addr);
+            if (styleCell?.hasAttribute("s")) cell.setAttribute("s",styleCell.getAttribute("s"));
+            const next = [...row.children].find((c) => XLSX.utils.decode_cell(c.getAttribute("r")).c > col);
+            row.insertBefore(cell, next || null);
+          }
+          cellText(cell,item[field]);
+        }
+        last = Math.max(last,item.r);
+      }
+      const dim = doc.getElementsByTagNameNS(ns,"dimension")[0];
+      if (dim) dim.setAttribute("ref",XLSX.utils.encode_range({s:template.range.s,e:{r:last,c:template.range.e.c}}));
+      entry.content = new TextEncoder().encode(new XMLSerializer().serializeToString(doc)); entry.size = entry.content.length;
+      return XLSX.CFB.write(zip, { fileType:"zip", type:"array", compression:true });
+    }
+    $("ozexport").addEventListener("click", async () => {
+      try {
+        restoreStation(); renderStation();
+        const out = filledWorkbook(), filename = data.fileName.replace(/\.xlsx$/i,"") + " — заполнено.xlsx";
+        await downloads.save({ filename, data: new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}) });
+        note("ok","Заполненный шаблон Ozon сохранён.");
+      } catch (e) { fail(e.message || "Не удалось выгрузить шаблон."); }
+    });
+    window.addEventListener("storage", (e) => {
+      if (e.key === storageKey || e.key === null) run(() => { restoreStation(); pending = null; renderStation(); });
+    });
+    try { restoreStation(); } catch (e) { if (mode === "ozon") fail("Не удалось открыть сохранённую сборку Ozon."); }
+    return { render: renderStation, scan: processScan, undo: undoScan };
+  }
+
   // ---------- boot ----------
+  const ozon = createOzonStation();
   loadReq();
   shops.forEach(restore);
   if (shops.every((s) => s.demo)) shops[0].rows = DEMO_ROWS.map((r) => Object.assign({}, r));
