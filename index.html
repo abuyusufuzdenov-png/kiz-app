@@ -416,7 +416,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
       <div class="modes" role="tablist">
         <button type="button" role="tab" data-mode="fbs">Сборка FBS</button>
         <button type="button" role="tab" data-mode="fbo">Поставка FBO</button>
-        <button type="button" role="tab" data-mode="ozon">Ozon</button>
+        <button type="button" role="tab" data-mode="ozon">Ozon FBS</button>
       </div>
       <div class="file" id="fileinfo">Пример. Загрузите файл sgtin из кабинета WB</div>
     </div>
@@ -429,7 +429,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
     </div>
   </header>
 
-  <section class="ozpanel ozonly" aria-label="Шаблон Ozon">
+  <section class="ozpanel ozonly" aria-label="Шаблон Ozon FBS">
     <div class="ozbar">
       <strong>Состав грузомест</strong>
       <button id="ozload" type="button">Загрузить шаблон</button>
@@ -2813,7 +2813,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
     }
     function renderStation() {
       if (mode !== "ozon") return;
-      $("title").textContent = "Ozon · состав грузомест";
+      $("title").textContent = "Ozon FBS · состав грузомест";
       $("fileinfo").textContent = data?.fileName || "Заполнение шаблона поставки";
       $("undo").disabled = !data?.items.length;
       $("ozcontrols").hidden = $("ozsummary").hidden = !data;
