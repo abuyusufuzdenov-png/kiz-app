@@ -2973,6 +2973,8 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       renderStation();
     }
     function qrKey(qr) { return qr.replace(/\x1d/g,""); }
+    // Printed Ozon unit labels such as ii50315796656 can occur in old, manually learned catalogues.
+    function isOzonUnitLabel(code) { return /^ii\d{11}$/i.test(code); }
     function restoreStation(nextKind = kind, space = workspace()) {
       const saved = space[nextKind] || null;
       const parsed = saved ? readTemplate(b64ToBuf(saved.b64)) : null;
@@ -3017,10 +3019,15 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     }
     function captureQr(value) {
       if (!data.article) throw Error("Загрузите карточки Ozon или введите артикул товара один раз.");
-      if (value.length > 32767 || /^01\d{14}21/.test(value) || value.includes(GS) || value === data.barcode || workspace().catalog[barcodeKey(value)])
-        throw Error("Сейчас нужен QR-код экземпляра Ozon.");
-      if (byQr(workspace(),value).length) throw Error("Этот QR Ozon уже связан с КИЗ.");
-      const old = template.rows.concat(data.items).find((r) => r.qr && qrKey(r.qr) === qrKey(value));
+      if (value.length > 32767) throw Error("QR-код слишком длинный для ячейки Excel.");
+      if (/^01\d{14}21/.test(value) || value.includes(GS)) throw Error("Считан КИЗ. Сейчас сканируйте QR Ozon, затем КИЗ этой вещи.");
+      if (isOzonUnitLabel(data.barcode)) throw Error("На первом шаге считан QR экземпляра. Нажмите «Сменить товар» и сканируйте штрихкод товара.");
+      const space = workspace(), rows = template.rows.concat(data.items), key = barcodeKey(value);
+      const old = rows.find((r) => r.qr && qrKey(r.qr) === qrKey(value));
+      if (key === barcodeKey(data.barcode) || (!isOzonUnitLabel(value) && !old &&
+          (space.catalog[key] || rows.some((r) => r.barcode && barcodeKey(r.barcode) === key))))
+        throw Error("Считан штрихкод товара. На этом шаге сканируйте QR Ozon с наклейки экземпляра.");
+      if (byQr(space,value).length) throw Error("Этот QR Ozon уже связан с КИЗ.");
       if (old && (old.box !== data.box || (old.barcode && barcodeKey(old.barcode) !== barcodeKey(data.barcode)) || (old.article && old.article !== data.article)))
         throw Error("Этот QR уже записан для другого товара или короба.");
       commit({ ...data, waitQr:value }); hideMsg(); renderStation(); beep("barcode");
@@ -3099,6 +3106,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       } catch (err) { fail(err.message || "Не удалось выгрузить КИЗ."); }
     });
     function chooseProduct(barcode) {
+      if (isOzonUnitLabel(barcode)) throw Error("Считан QR экземпляра Ozon. Сначала сканируйте штрихкод товара, затем этот QR.");
       if (/^01\d{14}21/.test(barcode) || /^https?:\/\//i.test(barcode) || barcode.includes(GS))
         throw Error("Сначала сканируйте штрихкод товара, затем уникальный QR-код экземпляра.");
       const group = template.boxes.get(data.box);
@@ -3112,7 +3120,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     }
     function buildPiece(qr) {
       if (qr.length > 32767) throw Error("QR-код слишком длинный для ячейки Excel.");
-      if (qr === data.barcode || template.rows.concat(data.items).some((r) => r.barcode === qr))
+      if (barcodeKey(qr) === barcodeKey(data.barcode) || (!isOzonUnitLabel(qr) && template.rows.concat(data.items).some((r) => r.barcode === qr)))
         throw Error("Считан штрихкод товара. Для другого товара нажмите «Сменить товар», для текущего сканируйте QR-код экземпляра.");
       const key = qrKey(qr);
       if (template.rows.concat(data.items).some((r) => r.qr && qrKey(r.qr) === key))
@@ -3208,7 +3216,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         (kind === "counts" ? countedRows().filter((r) => r.box === value).reduce((s,r) => s + Number(r.qty || 0),0) : countBox(value)) + " шт." };
       const bc = barcodeKey(value), byArticle = view.articles.get("a:" + value);
       const groups = view.products.get(bc) || (byArticle ? new Set([byArticle]) : null);
-      if (groups || view.catalog[bc]) {
+      if (!(kind === "pieces" && isOzonUnitLabel(value)) && (groups || view.catalog[bc])) {
         const detail = groups ? [...groups].map((r) => r.label + " · " + r.total + " шт. в поставке").join(", ") : view.catalog[bc].article + " · 0 шт. в поставке";
         return { state:"info", title:"Количество по товару", detail:detail + (kind === "pieces" ? ". Для проверки одной вещи сканируйте QR Ozon или КИЗ." : ".") };
       }
