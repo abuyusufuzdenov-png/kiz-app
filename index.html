@@ -462,6 +462,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       <button id="ozyes" type="button">Открыть новый</button><button id="ozno" type="button">Отмена</button>
     </div>
     <div id="ozcontrols" hidden>
+      <label class="ozswitch" id="ozcountmarklabel" hidden><input id="ozcountmarks" type="checkbox"> Собирать КИЗ по артикулам</label>
       <div class="ozfields">
         <label>Грузоместо<select id="ozbox"></select></label>
         <label id="ozartlabel" hidden>Артикул товара<input id="ozarticle" autocomplete="off"></label>
@@ -528,6 +529,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
   <section class="ozpanel ozonly" id="ozmarks" hidden>
     <div class="ozbar"><strong>КИЗ для вывода из оборота</strong><span id="ozmarkcount"></span></div>
     <label class="ozswitch">Поставка<select id="ozmarkbatch"></select></label>
+    <label class="ozswitch">Артикул<select id="ozmarkarticle"></select></label>
     <div id="ozmarkconflicts"></div>
     <div class="ozbar"><button type="button" id="ozmarkexport">Скачать КИЗ (Excel)</button></div>
   </section>
@@ -2929,7 +2931,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         const selected = old && groups.get(groupKey(old));
         selection = selected ? countSelection(selected) : { ...resetProduct(), selected:null, zone:"" };
       }
-      return { ...version, clock, box, ...selection, items:[...rows.values()], ...(counts ? { history } : {}) };
+      return { ...version, clock, box, ...selection, items:[...rows.values()], ...(counts ? { history, withMarks:!!(same && previous.withMarks), countDraft:same ? previous.countDraft || null : null } : {}) };
     }
     // Both supplies, the article directory and the independent marking register change atomically.
     const workspaceKey = "kiz-ozon-work-v2";
@@ -2965,6 +2967,15 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         if (parsed.format !== k) throw Error("Формат шаблона Ozon при синхронизации не совпал.");
         space[k] = materialize(version,parsed,saved);
       }
+      const countedSupply = space.counts;
+      if (countedSupply) {
+        const batch = hashStr(countedSupply.b64) + "/" + (countedSupply.epoch || 0);
+        for (const [id,e] of Object.entries(countedSupply.events || {})) {
+          if (!id.startsWith("k:") || !e.removed) continue;
+          const key = JSON.stringify([batch,id]), m = space.marks[key];
+          if (m && !m.removed) space.marks[key] = { removed:true,t:Math.max(e.t,m.t) };
+        }
+      }
       space.reset = floor;
       if (JSON.stringify(space) === before) return;
       writeSpace(space);
@@ -2994,7 +3005,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     function run(action) { try { action(); } catch (e) { fail(e.message || "Не удалось изменить сборку."); } }
     function chooseBox(box) {
       if (!template?.boxes.has(box)) return;
-      commit({ ...data, box, ...resetProduct(), ...(kind === "counts" ? { selected: null, zone: "" } : {}) }); hideMsg(); renderStation(); focusScan();
+      commit({ ...data, box, ...resetProduct(), ...(kind === "counts" ? { selected:null, zone:"", countDraft:null } : {}) }); hideMsg(); renderStation(); focusScan();
     }
     function barcodeKey(value) {
       const s = String(value).trim();
@@ -3051,14 +3062,14 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       hideMsg(); renderStation(); beep("kiz"); note("ok","Экземпляр собран. Сканируйте штрихкод следующего товара.");
       flash("ok","✓",mark.article,"QR и КИЗ сохранены");
     }
-    let registerContext = "";
+    let registerContext = "", registerFilterSupply = "";
     function renderRegister(space) {
       const entries = activeMarks(space), groups = new Map();
       for (const [,m] of entries) if (!groups.has(m.supply)) groups.set(m.supply,m);
       $("ozmarks").hidden = !groups.size;
       if (!groups.size) return;
       const select = $("ozmarkbatch"), previous = select.value;
-      const current = kind === "pieces" && data ? supplyId() : "";
+      const current = data ? supplyId() : "";
       const names = new Set(), repeated = new Set();
       for (const m of groups.values()) { if (names.has(m.fileName)) repeated.add(m.fileName); names.add(m.fileName); }
       select.replaceChildren(...[...groups].map(([id,m]) => {
@@ -3069,16 +3080,27 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       select.value = context && context !== registerContext ? current : groups.has(previous) ? previous : context || [...groups.keys()].pop();
       registerContext = context;
       const selected = entries.filter(([,m]) => m.supply === select.value);
-      $("ozmarkcount").textContent = selected.length + " шт.";
+      const picker = $("ozmarkarticle");
+      const previousArticle = registerFilterSupply === select.value ? picker.value : "";
+      const articles = [...new Set(selected.map(([,m]) => m.article).filter(Boolean))].sort((a,b) => a.localeCompare(b,"ru"));
+      picker.replaceChildren(new Option("Все артикулы",""),...articles.map(a => new Option(a,a)));
+      if (articles.includes(previousArticle)) picker.value = previousArticle;
+      registerFilterSupply = select.value;
+      const visible = selected.filter(([,m]) => !picker.value || m.article === picker.value);
+      $("ozmarkcount").textContent = visible.length + " шт.";
       // Expose competing scans to the operator instead of choosing a code for withdrawal.
       const counts = new Map();
-      for (const [,m] of entries) for (const k of ["q:"+qrKey(m.qr),"m:"+m.identity]) counts.set(k,(counts.get(k)||0)+1);
-      const conflicts = selected.filter(([,m]) => counts.get("q:"+qrKey(m.qr)) > 1 || counts.get("m:"+m.identity) > 1);
+      for (const [,m] of entries) {
+        const keys = ["m:"+m.identity];
+        if (m.qr) keys.push("q:"+qrKey(m.qr));
+        for (const k of keys) counts.set(k,(counts.get(k)||0)+1);
+      }
+      const conflicts = visible.filter(([,m]) => (m.qr && counts.get("q:"+qrKey(m.qr)) > 1) || counts.get("m:"+m.identity) > 1);
       $("ozmarkexport").disabled = !!conflicts.length;
       $("ozmarkconflicts").replaceChildren();
       for (const [key,m] of conflicts) {
         const row = document.createElement("p"), btn = document.createElement("button");
-        row.textContent = "Повторная привязка: " + m.article + " · QR " + m.qr + " · КИЗ " + m.identity + " ";
+        row.textContent = "Повторная привязка: " + m.article + (m.qr ? " · QR " + m.qr : "") + " · КИЗ " + m.identity + " ";
         btn.type = "button"; btn.textContent = "Убрать эту привязку";
         btn.onclick = () => run(() => {
           const latest = workspace();
@@ -3088,19 +3110,22 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         row.append(btn); $("ozmarkconflicts").append(row);
       }
     }
+    $("ozmarkarticle").addEventListener("change",() => renderRegister(workspace()));
     $("ozmarkbatch").addEventListener("change",() => renderRegister(workspace()));
     $("ozmarkexport").addEventListener("click", async () => {
       try {
         const space = workspace(); renderRegister(space);
         if ($("ozmarkexport").disabled) throw Error("Проверьте повторные привязки в списке КИЗ.");
-        const id = $("ozmarkbatch").value, marks = activeMarks(space).map(([,m]) => m).filter((m) => m.supply === id).sort((a,b) => a.t-b.t);
+        const id = $("ozmarkbatch").value, article = $("ozmarkarticle").value;
+        const marks = activeMarks(space).map(([,m]) => m).filter((m) => m.supply === id && (!article || m.article === article))
+          .sort((a,b) => a.article.localeCompare(b.article,"ru") || a.t-b.t);
         if (!marks.length) throw Error("В этой поставке нет отсканированных КИЗ.");
         const rows = [["Код идентификации","Полный код маркировки","Артикул Ozon","Штрихкод товара","QR Ozon","Грузоместо"]];
         for (const m of marks) rows.push([m.identity,m.code,m.article,m.barcode,m.qr,m.box]);
         const wb = XLSX.utils.book_new(), sheet = XLSX.utils.aoa_to_sheet(rows);
         sheet["!cols"] = [38,88,26,24,26,24].map((wch) => ({wch}));
         XLSX.utils.book_append_sheet(wb,sheet,"КИЗ");
-        await downloads.save({ filename:"КИЗ Ozon — " + marks[0].fileName.replace(/\.xlsx$/i,"") + ".xlsx",
+        await downloads.save({ filename:"КИЗ Ozon — " + (article ? article.replace(/[\\/:*?"<>|]/g,"_") + " — " : "") + marks[0].fileName.replace(/\.xlsx$/i,"") + ".xlsx",
           data:new Blob([XLSX.write(wb,{type:"array",bookType:"xlsx",bookSST:true})]) });
         note("ok","Список КИЗ сохранён.");
       } catch (err) { fail(err.message || "Не удалось выгрузить КИЗ."); }
@@ -3159,16 +3184,14 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       const counts = kind === "counts";
       const contents = counts ? countedRows().filter((r) => r.qty > 0) : template.rows.concat(data.items).filter((r) => r.qr);
       const qrRows = new Map(), marks = new Map(), products = new Map(), articles = new Map();
-      const assigned = new Map();
-      if (!counts) {
-        const id = supplyId();
-        for (const [,m] of activeMarks(space)) {
-          if (m.supply !== id) continue;
-          const qr = qrKey(m.qr);
-          assigned.set(qr,m);
-          if (!marks.has(m.identity)) marks.set(m.identity,new Set());
-          marks.get(m.identity).add(qr);
-        }
+      const assigned = new Map(), countMarks = new Map(), id = supplyId();
+      for (const [,m] of activeMarks(space)) {
+        if (m.supply !== id) continue;
+        if (counts) { countMarks.set(m.identity,m); continue; }
+        const qr = qrKey(m.qr);
+        assigned.set(qr,m);
+        if (!marks.has(m.identity)) marks.set(m.identity,new Set());
+        marks.get(m.identity).add(qr);
       }
       for (const r of contents) {
         const qr = r.qr && qrKey(r.qr), mark = qr && assigned.get(qr);
@@ -3187,7 +3210,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         }
         if (qr) qrRows.set(qr,{ qr, article:group.label, box:r.box, mark });
       }
-      return { articles, products, qrRows, marks, catalog:space.catalog };
+      return { articles, products, qrRows, marks, countMarks, catalog:space.catalog };
     }
     function showArticles(view) {
       const rows = [...view.articles.values()].sort((a,b) => b.total - a.total || a.label.localeCompare(b.label,"ru"));
@@ -3201,6 +3224,11 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     }
     function lookup(value,view) {
       const qr = qrKey(value), identity = markingIdentity(value);
+      if (kind === "counts" && identity) {
+        const m = view.countMarks.get(identity);
+        return m ? { state:"found",key:identity,title:"КИЗ уже учтён",detail:m.article + " · короб " + m.box }
+          : { state:"missing",key:identity,title:"КИЗ не найден",detail:"В личном списке этой поставки такого КИЗ нет." };
+      }
       if (kind === "pieces") {
         let unit = view.qrRows.get(qr);
         if (!unit && identity) {
@@ -3220,7 +3248,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         const detail = groups ? [...groups].map((r) => r.label + " · " + r.total + " шт. в поставке").join(", ") : view.catalog[bc].article + " · 0 шт. в поставке";
         return { state:"info", title:"Количество по товару", detail:detail + (kind === "pieces" ? ". Для проверки одной вещи сканируйте QR Ozon или КИЗ." : ".") };
       }
-      if (kind === "counts") return { state:"info", title:"Нет записей по этому коду", detail:"Для этого шаблона поиск работает по штрихкоду товара или артикулу." };
+      if (kind === "counts") return { state:"info", title:"Нет записей по этому коду", detail:"Проверьте штрихкод товара, артикул или КИЗ из личного списка." };
       return { state:"missing", key:identity || qr, title:identity ? "КИЗ не найден" : "Код не найден", detail:"В текущей поставке нет записи для этого кода." + (identity ? " Проверьте также QR Ozon на этой вещи." : "") };
     }
     function showAudit(view, announce) {
@@ -3231,15 +3259,16 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         if (hit.state === "missing" || hit.state === "pending") missing.set(hit.key,value);
       }
       const pieces = kind === "pieces";
-      $("ozauditprogress").hidden = !pieces;
-      $("ozauditprogress").textContent = "Проверено экземпляров: " + found.size + " из " + view.qrRows.size + " · кодов без учёта: " + missing.size;
-      $("ozauditreset").hidden = !pieces || !audit.codes.length;
+      const trackUnits = pieces || data.withMarks || view.countMarks.size > 0;
+      $("ozauditprogress").hidden = !trackUnits;
+      $("ozauditprogress").textContent = "Проверено экземпляров: " + found.size + " из " + (pieces ? view.qrRows.size : view.countMarks.size) + " · кодов без учёта: " + missing.size;
+      $("ozauditreset").hidden = !audit.codes.length;
       $("ozmissing").hidden = !missing.size;
       $("ozmissinglist").replaceChildren(...[...missing.values()].map((v) => { const li = document.createElement("li"); li.textContent = v.replaceAll(GS,"␝"); return li; }));
-      scan.placeholder = pieces ? "Проверка QR, КИЗ или штрихкода" : "Поиск по штрихкоду товара";
+      scan.placeholder = pieces ? "Проверка QR, КИЗ или штрихкода" : "Проверка КИЗ или штрихкода";
       const step = $("step"); step.className = "step";
       step.innerHTML = '<div class="badge" aria-hidden="true">⌕</div><div class="title">Поиск по скану</div><div class="sub">' +
-        (pieces ? "Сканируйте QR Ozon или КИЗ каждой вещи. Проверочные сканы не прибавляют штуки." : "Штрихкод покажет учтённое количество товара в поставке.") + "</div>";
+        (pieces ? "Сканируйте QR Ozon или КИЗ каждой вещи. Проверочные сканы не прибавляют штуки." : "Штрихкод покажет количество по товару, КИЗ — привязанный артикул и короб.") + "</div>";
       if (!audit.last) { hideMsg(); camUpdate(); return; }
       const hit = lookup(audit.last,view);
       const status = hit.state === "found" ? "ok" : hit.state === "missing" ? "err" : "warn";
@@ -3274,18 +3303,19 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         }
         if (template.boxes.has(v)) return chooseBox(v);
         if (!data.box) throw Error("Выберите или сканируйте грузоместо из шаблона.");
-        if (kind === "counts") return addCount(v);
         const supply = supplyId(), identity = markingIdentity(v), qr = qrKey(v);
-        const matches = activeMarks(workspace()).filter(([,m]) => (identity && m.identity === identity) || qrKey(m.qr) === qr);
+        const space = workspace();
+        const matches = activeMarks(space).filter(([,m]) => (identity && m.identity === identity) || qrKey(m.qr) === qr);
         const mark = matches.find(([,m]) => m.supply === supply) || matches[0];
         // At the QR step an imported unit can still receive its first marking code.
-        const knownUnit = mark?.[1] || ((!data.barcode || data.waitQr) &&
+        const knownUnit = mark?.[1] || (kind === "pieces" && (!data.barcode || data.waitQr) &&
           template.rows.concat(data.items).find((r) => r.qr && qrKey(r.qr) === qr));
         if (knownUnit) {
           const detail = (knownUnit.article || knownUnit.barcode || "Экземпляр") + " · короб " + knownUnit.box;
           const title = mark && mark[1].supply !== supply ? "Уже учтено в другой поставке" : "Уже учтено";
           note("warn",title + ". Код уже сохранён: " + detail); beep("lookupFound"); flash("warn","✓",title,detail); return;
         }
+        if (kind === "counts") return scanCount(v,identity,space);
         if (!data.barcode) return chooseProduct(v);
         if (data.waitQr) return finishPiece(v);
         captureQr(v);
@@ -3302,12 +3332,12 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     function countSelection(row) {
       return { selected: row.r, barcode: row.barcode || row.article, article: row.article, expiry: row.expiry, zone: row.zone };
     }
-    function addCount(code) {
-      if (code.length > 32767 || code.includes(GS) || /^01\d{14}21/.test(code) || /^https?:\/\//i.test(code))
+    function countProduct(code,space,article) {
+      if (isOzonUnitLabel(code) || code.length > 32767 || code.includes(GS) || /^01\d{14}21/.test(code) || /^https?:\/\//i.test(code))
         throw Error("Для подсчёта сканируйте штрихкод товара с этикетки.");
       const rows = countedRows(), group = rows.filter((r) => r.box === data.box);
       const known = rows.find((r) => r.barcode === code);
-      const knownArticle = workspace().catalog[barcodeKey(code)]?.article || known?.article || "";
+      const knownArticle = article || space.catalog[barcodeKey(code)]?.article || known?.article || "";
       let row = group.find((r) => r.barcode === code || (r.article && (r.article === code || r.article === knownArticle)));
       if (!row) row = group.find((r) => !r.barcode && !r.article);
       if (!row) {
@@ -3320,15 +3350,43 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       if (!Number.isSafeInteger(qty)) throw Error("Количество слишком велико для Excel.");
       const barcode = row.barcode || (row.article && code === row.article ? "" : code);
       const item = { ...row, ref: row.ref ?? row.r, barcode, article: row.article || knownArticle, qty };
-      const id = "c:" + uuid();
       item.sku = row.sku || row.barcode || row.article || code;
       for (const field of ["article","expiry","zone"]) {
         const edit = data.meta?.[JSON.stringify([groupKey(item),field])];
         if (edit) item[field] = edit.value;
       }
-      commit({ ...data, ...eventEdit(id,{ ...scanFields(item), sku:item.sku }), items: withCountRow(item), history: [...data.history,id], ...countSelection(item) });
-      renderStation(); beep("barcode"); hideMsg();
-      flash("ok","+1",item.article || item.barcode,qty + " шт. в этом коробе");
+      return item;
+    }
+    function scanCount(value,identity,space) {
+      const draft = data.withMarks && data.countDraft;
+      if (draft && (!identity || value.length > 32767)) throw Error("Теперь сканируйте КИЗ выбранного товара. Для другой вещи нажмите «Сменить товар».");
+      const item = countProduct(draft ? draft.code : value,space,draft?.article);
+      if (data.withMarks && !draft) {
+        commit({ ...data, countDraft:{code:value,article:item.article}, selected:null },space);
+        hideMsg(); renderStation(); beep("barcode"); return;
+      }
+      const id = draft ? "k:" + identity : "c:" + uuid();
+      const fields = { ...scanFields(item), sku:item.sku };
+      if (draft) {
+        if (data.events?.[id] && !data.events[id].removed) throw Error("Этот экземпляр уже учтён в поставке.");
+        const article = draft.article || item.article;
+        if (!article) throw Error("Введите артикул товара или загрузите карточки Ozon, затем сканируйте КИЗ снова.");
+        if (item.article && item.article !== article) throw Error("В этом коробе у штрихкода уже указан артикул " + item.article + ". Проверьте выбранный товар.");
+        item.article = fields.article = article;
+        rememberArticle(space,item.barcode,article);
+        Object.assign(fields,{ identity, code:value, supply:supplyId(), fileName:data.fileName, countEvent:id });
+      }
+      const update = eventEdit(id,fields);
+      if (draft) {
+        // Both documents merge the same record. Two offline scans of one KIZ count once.
+        const key = JSON.stringify([fields.supply,id]);
+        const t = Math.max(update.clock,newerStamp(space.marks[key]));
+        update.clock = update.events[id].t = t;
+        space.marks[key] = update.events[id];
+      }
+      commit({ ...data,...update,countDraft:null,items:withCountRow(item),history:[...data.history,id],...countSelection(item) },space);
+      renderStation(); beep(draft ? "kiz" : "barcode"); hideMsg();
+      flash("ok","+1",item.article || item.barcode,(draft ? "КИЗ сохранён · " : "") + item.qty + " шт. в этом коробе");
     }
     function updateCountField(field, value) {
       const item = data.items.find((r) => r.r === data.selected);
@@ -3338,13 +3396,28 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       if (field === "article" && !value && !item.barcode) throw Error("Для товара нужен артикул или штрихкод.");
       const updated = { ...item, [field]: value };
       const t = nextTime(), key = JSON.stringify([groupKey(item),field]);
-      commit({ ...data, clock:t, meta:{ ...data.meta, [key]:{ t,value } }, items: withCountRow(updated), ...countSelection(updated) });
+      const space = workspace();
+      if (field === "article") {
+        const batch = supplyId();
+        const linked = activeMarks(space).filter(([,m]) => m.supply === batch && m.countEvent && groupKey(m) === groupKey(item));
+        if (!value && linked.length) throw Error("Для собранных КИЗ нужен артикул товара.");
+        for (const [key,m] of linked) space.marks[key] = { ...m,article:value,t:newerStamp(m) };
+        if (value) rememberArticle(space,item.barcode,value);
+      }
+      commit({ ...data, clock:t, meta:{ ...data.meta, [key]:{ t,value } }, items: withCountRow(updated), ...countSelection(updated) },space);
     }
     function undoCount() {
+      if (data?.countDraft) { commit({ ...data,countDraft:null }); hideMsg(); renderStation(); focusScan(); return; }
       if (!data?.history.length) return;
       const id = data.history[data.history.length - 1], item = data.events[id];
       const updated = { ...data, ...eventEdit(id,{ removed:true }) };
-      commit(materialize(cloudVersion(updated),template,data));
+      const space = workspace();
+      if (item.countEvent) {
+        const key = JSON.stringify([supplyId(),id]), tomb = updated.events[id];
+        updated.clock = tomb.t = Math.max(tomb.t,newerStamp(space.marks[key]));
+        space.marks[key] = tomb;
+      }
+      commit(materialize(cloudVersion(updated),template,data),space);
       renderStation(); note("warn","Отменён один скан: " + (item.article || item.barcode) + " · короб " + item.box + "."); focusScan();
     }
     function countBox(box) {
@@ -3356,6 +3429,9 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       $("title").textContent = "Ozon · состав грузомест";
       const space = workspace();
       if (audit && (!data || audit.kind !== kind || audit.supply !== supplyId())) { audit = null; saveAudit(); hideMsg(); }
+      $("ozcountmarklabel").hidden = !counts || !data;
+      $("ozcountmarks").checked = !!data?.withMarks;
+      $("ozcountmarks").disabled = !!pending || !!audit?.active;
       $("ozlookupbar").hidden = !data;
       $("ozlookup").disabled = !!pending;
       const checking = !!audit?.active;
@@ -3372,13 +3448,15 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       if (pending?.reset) $("ozreplaceprompt").textContent = "Сбросить обе сборки Ozon на подключённых устройствах и открыть новый файл? Карточки товаров и список КИЗ сохранятся.";
       else if (pending) $("ozreplaceprompt").textContent = "Заменить сборку «" + formats[pending.template.format].label + "» новым шаблоном?";
       $("fileinfo").textContent = data?.fileName || "Заполнение шаблона поставки";
-      $("undo").disabled = counts ? !data?.history.length : !data?.waitQr && !data?.items.length && !latestMark(space);
+      $("undo").disabled = counts ? !data?.history.length && !data?.countDraft : !data?.waitQr && !data?.items.length && !latestMark(space);
       $("ozarticle").readOnly = !counts && !!data?.waitQr;
       $("ozcontrols").hidden = $("ozsummary").hidden = !data;
       $("ozreplace").hidden = !pending;
-      const barcode = data?.barcode || "";
-      $("ozartlabel").hidden = $("ozdates").hidden = $("ozchange").disabled = !barcode;
-      $("ozchange").hidden = counts || checking;
+      const draft = counts && data?.countDraft;
+      const barcode = draft ? draft.code : data?.barcode || "";
+      $("ozartlabel").hidden = $("ozchange").disabled = !barcode;
+      $("ozdates").hidden = !barcode || !!draft;
+      $("ozchange").hidden = (counts && !draft) || checking;
       if (checking) $("undo").disabled = true;
       $("ozarticle").disabled = $("ozdate").disabled = $("ozzone").disabled = $("ozbox").disabled = checking;
       $("ozzonelabel").hidden = !counts;
@@ -3393,7 +3471,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         $("ozbox").replaceChildren(new Option("Выберите грузоместо", ""), ...[...template.boxes.keys()].map((box) => new Option(box,box)));
         $("ozbox").firstElementChild.disabled = true;
         $("ozbox").value = data.box;
-        if (document.activeElement !== $("ozarticle")) $("ozarticle").value = data.article;
+        if (document.activeElement !== $("ozarticle")) $("ozarticle").value = draft ? draft.article : data.article;
         if (document.activeElement !== $("ozdate")) $("ozdate").value = data.expiry;
         if (counts && document.activeElement !== $("ozzone")) $("ozzone").value = data.zone || "";
         $("ozcount").textContent = "Всего " + total + " шт." + (data.box ? " · в грузоместе " + (counts ? sum(inBox) : countBox(data.box)) : "");
@@ -3403,6 +3481,15 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       if (data) {
         const view = inventory(space); showArticles(view);
         if (checking) { showAudit(view,false); return; }
+      }
+      if (counts && data?.box && data.withMarks) {
+        scan.placeholder = draft ? "КИЗ с маркировки" : "Штрихкод товара";
+        $("step").className = draft ? "step kiz" : "step";
+        const hint = draft ? (draft.article || "Введите артикул товара или загрузите карточки Ozon") + " · " + draft.code :
+          "Для каждой вещи сканируйте штрихкод, затем КИЗ. Количество увеличится после КИЗ.";
+        $("step").innerHTML = '<div class="badge">' + (draft ? "2" : "1") + '</div><div class="title">' +
+          (draft ? "Сканируйте КИЗ товара" : "Сканируйте штрихкод товара") + '</div><div class="sub">' + esc(hint) + "</div>";
+        return;
       }
       if (counts && data?.box) {
         scan.placeholder = "Штрихкод товара";
@@ -3489,17 +3576,23 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         const initial = { fileName: f.name, b64, events:{}, meta:{}, opened, epoch:saved ? Math.max(opened,(saved.epoch || 0)+1) : space.reset, items: [], box: boxes.length === 1 ? boxes[0] : "", ...resetProduct() };
         if (next === "counts") Object.assign(initial, { history: [], selected: null, zone: "" });
         pending = { template: parsed, expected, other:slotText(space,next === "pieces" ? "counts" : "pieces"), reset, data: initial };
-        if (reset || saved?.items.length || saved?.waitQr) renderStation(); else installPending();
+        if (reset || saved?.items.length || saved?.waitQr || saved?.countDraft) renderStation(); else installPending();
       } catch (err) { fail(err.message || "Не удалось прочитать Excel."); }
     });
     $("ozyes").addEventListener("click", () => run(installPending));
     $("ozno").addEventListener("click", () => { pending = null; renderStation(); focusScan(); });
+    $("ozcountmarks").addEventListener("change",() => run(() => {
+      if (kind !== "counts" || !data) return;
+      commit({ ...data,withMarks:$("ozcountmarks").checked,countDraft:null }); hideMsg(); renderStation(); focusScan();
+    }));
     $("ozbox").addEventListener("change", (e) => run(() => chooseBox(e.target.value)));
     $("ozchange").addEventListener("click", () => run(() => chooseBox(data.box)));
     for (const [id, field] of [["ozarticle","article"],["ozdate","expiry"],["ozzone","zone"]]) {
       $(id).addEventListener("change", (e) => run(() => {
         const value = e.target.value.trim();
-        if (kind === "counts") {
+        if (kind === "counts" && data.countDraft && field === "article") {
+          commit({ ...data,countDraft:{...data.countDraft,article:value} });
+        } else if (kind === "counts") {
           try { updateCountField(field,value); } catch (err) { e.target.value = data[field] || ""; throw err; }
         } else {
           const space = workspace();
@@ -3537,7 +3630,10 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         }
         if (!pairs.size) throw Error("Нужен Excel из Ozon с колонками «штрихкод» и «артикул».");
         const space = workspace(); for (const [key,art] of pairs) rememberArticle(space,key.slice(2),art);
-        if (kind === "pieces" && data?.barcode && !data.waitQr) {
+        if (kind === "counts" && data?.countDraft) {
+          const d = data.countDraft;
+          commit({ ...data,countDraft:{...d,article:space.catalog[barcodeKey(d.code)]?.article || d.article} },space);
+        } else if (kind === "pieces" && data?.barcode && !data.waitQr) {
           commit({ ...data, article:space.catalog[barcodeKey(data.barcode)]?.article || data.article },space);
         } else { writeSpace(space); scheduleSync(); }
         renderStation(); note("ok","Загружено соответствий: " + pairs.size + "."); focusScan();
