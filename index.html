@@ -385,7 +385,7 @@ body { margin: 0; }
   .shopdocs { scroll-margin-top: 10px; }
 }
 body:not([data-mode="ozon"]) .ozonly,
-body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { display: none !important; }
+body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat) { display: none !important; }
 .ozpanel { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .ozbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .ozbar strong { margin-right: auto; }
@@ -393,6 +393,8 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
 .ozfields label { display: grid; gap: 3px; min-width: 0; color: var(--muted); font-size: 13px; }
 .ozfields :is(select,input) { width: 100%; min-width: 0; min-height: 42px; padding: 6px 8px; border: 1px solid var(--line);
   border-radius: 7px; background: var(--bg); color: var(--ink); font: inherit; font-size: 15px; }
+.ozswitch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; }
+.ozswitch select { max-width: 100%; min-height: 44px; padding: 4px 8px; font: inherit; }
 #ozrecent { display: grid; gap: 5px; margin: 6px 0 0; padding-left: 20px; overflow-wrap: anywhere; }
 @media (max-width: 640px) {
   header .modes, body[data-mode="fbs"] header .modes { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); }
@@ -414,9 +416,9 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
       <div class="brand">NITTIONE</div>
       <h1 id="title">КИЗ Сканер</h1>
       <div class="modes" role="tablist">
-        <button type="button" role="tab" data-mode="fbs">Сборка FBS</button>
-        <button type="button" role="tab" data-mode="fbo">Поставка FBO</button>
-        <button type="button" role="tab" data-mode="ozon">Ozon FBS</button>
+        <button type="button" role="tab" data-mode="fbs">WB FBS</button>
+        <button type="button" role="tab" data-mode="fbo">WB FBO</button>
+        <button type="button" role="tab" data-mode="ozon">Ozon</button>
       </div>
       <div class="file" id="fileinfo">Пример. Загрузите файл sgtin из кабинета WB</div>
     </div>
@@ -429,14 +431,17 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
     </div>
   </header>
 
-  <section class="ozpanel ozonly" aria-label="Шаблон Ozon FBS">
+  <section class="ozpanel ozonly" aria-label="Шаблоны Ozon">
     <div class="ozbar">
-      <strong>Состав грузомест</strong>
+      <strong id="ozformat">Состав грузомест</strong>
       <button id="ozload" type="button">Загрузить шаблон</button>
       <button id="ozexport" class="primary" type="button" disabled>Скачать Excel</button>
       <input id="ozfile" type="file" class="vh" tabindex="-1" accept=".xlsx">
     </div>
-    <div class="confirm" id="ozreplace" hidden>Открыть другой шаблон вместо текущей сборки?
+    <label class="ozswitch" id="ozswitchlabel" hidden>Открытая сборка
+      <select id="ozswitch"><option value="pieces">QR по экземплярам</option><option value="counts">Количество по коробам</option></select>
+    </label>
+    <div class="confirm" id="ozreplace" hidden><span id="ozreplaceprompt"></span>
       <button id="ozyes" type="button">Открыть новый</button><button id="ozno" type="button">Отмена</button>
     </div>
     <div id="ozcontrols" hidden>
@@ -444,7 +449,10 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
         <label>Грузоместо<select id="ozbox"></select></label>
         <label id="ozartlabel" hidden>Артикул товара<input id="ozarticle" autocomplete="off"></label>
       </div>
-      <details id="ozdates" hidden><summary>Срок годности</summary><div class="ozfields"><label>Годен до<input type="date" id="ozdate"></label></div></details>
+      <details id="ozdates" hidden><summary id="ozdetailslabel">Срок годности</summary><div class="ozfields">
+        <label>Годен до<input type="date" id="ozdate"></label>
+        <label id="ozzonelabel" hidden>Зона размещения<input id="ozzone" autocomplete="off"></label>
+      </div></details>
     </div>
   </section>
 
@@ -487,13 +495,13 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
 
   <section class="ozpanel ozonly" id="ozsummary" hidden>
     <div class="ozbar"><strong id="ozcount"></strong><button id="ozchange" type="button">Сменить товар</button></div>
-    <details><summary>Последние экземпляры</summary><ol id="ozrecent"></ol></details>
+    <details><summary id="ozlistlabel">Последние экземпляры</summary><ol id="ozrecent"></ol></details>
     <span class="file">Сборка сохраняется на этом устройстве.</span>
   </section>
   <section class="fbo fboonly" id="fbo">
     <div class="fbohead">
       <div>
-        <h2>Поставка FBO: короб → баркод → КИЗ</h2>
+        <h2>WB FBO · короб → баркод → КИЗ</h2>
         <div class="file" id="fbostat"></div>
       </div>
       <div class="gbtns">
@@ -1039,7 +1047,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
       $("bigstat").innerHTML = '<div class="nums"><div><div class="big">' + inBox + '</div><div class="lbl">' + (displayBox ? esc(boxLabel(displayBox).replace(/^(\d)/, "Короб $1")) : "короб не выбран") + '</div></div>' +
         '<div class="right"><div class="big done">' + fbo.items.length + '</div><div class="lbl">всего в поставке</div></div></div>';
     }
-    $("title").textContent = "Поставка FBO: короба, баркоды, КИЗ";
+    $("title").textContent = "WB FBO · короба, баркоды, КИЗ";
     const boxes = [...new Set(fbo.items.map((it) => it.box))];
     $("fileinfo").textContent = fbo.items.length ? "КИЗ: " + fbo.items.length + (boxes.filter(Boolean).length ? " · коробов: " + boxes.filter(Boolean).length : "") : "Сканируйте QR-код первого короба";
     const usesBoxes = fbo.items.some((it) => it.box) || !!fbo.box;
@@ -1822,7 +1830,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
     scan.placeholder = mode === "fbo" ? "QR короба → баркод товара → КИЗ" : "Стикер или КИЗ";
     if (mode === "ozon") return ozon.render();
     if (mode === "fbo") return renderFbo();
-    $("title").textContent = "Сборка FBS: КИЗ по стикеру";
+    $("title").textContent = "WB FBS · КИЗ по стикеру";
     renderFbs();
   }
   let showDone = false;
@@ -2391,7 +2399,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
       v: 1, fbs: shopDoc(shops[0]),
       fbo: { epoch: fbo.epoch, del: fbo.del, items: fbo.items.map((it) => ({ kiz: it.kiz, box: it.box, gtin: it.gtin, barcode: it.barcode || "", t: it.t || 1, ...(it.boxT ? { boxT: it.boxT } : {}) })) },
       gtin: gtinMap, bc: bcMap, boxnum: boxNumMap, req: readReq(shops[0]),
-      second: { fbs: shopDoc(shops[1]), req: readReq(shops[1]) }
+      second: { fbs: shopDoc(shops[1]), req: readReq(shops[1]) }, ozon: ozon.outgoing()
     };
   }
   function mergeShop(shop, remote) {
@@ -2498,9 +2506,23 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
   }
   // Older clients only update GIST_FILE. Keep the second shop in its own file in the same gist.
   const SECOND_FILE = "kiz-shop2.json";
-  function gistFiles(doc) {
-    const { second, ...legacy } = doc;
-    return { [GIST_FILE]: { content: JSON.stringify(legacy) }, [SECOND_FILE]: { content: JSON.stringify(second) } };
+  // Each device owns one Ozon file. Concurrent PATCH requests never overwrite another device's scan log.
+  function deviceFile() {
+    let id = localStorage.getItem("kiz-ozon-device");
+    if (!id) { id = uuid(); localStorage.setItem("kiz-ozon-device",id); }
+    return "kiz-ozon-" + id + ".json";
+  }
+  function gistFiles(doc, previous) {
+    const { second, ozon, ...legacy } = doc, files = {};
+    const { second: oldSecond, ozon: oldOzon, ...oldLegacy } = previous || {};
+    function add(name, value, old) {
+      const content = JSON.stringify(value);
+      if (content !== JSON.stringify(old)) files[name] = { content };
+    }
+    add(GIST_FILE,legacy,previous ? oldLegacy : undefined);
+    add(SECOND_FILE,second,oldSecond);
+    if (ozon) add(deviceFile(),ozon,oldOzon);
+    return files;
   }
   async function findOrCreateGist() {
     if (syncCfg.gist && Date.now() - lastResolve < 60000) return syncCfg.gist;
@@ -2521,6 +2543,15 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
     }
     const doc = await readFile(f);
     if (g.files[SECOND_FILE]) doc.second = await readFile(g.files[SECOND_FILE]);
+    const peers = Object.entries(g.files).filter(([name]) => /^kiz-ozon-[a-f0-9-]+\.json$/i.test(name));
+    const own = deviceFile(), docs = [];
+    doc.ozon = null;
+    for (const [name,file] of peers) {
+      const snapshot = await readFile(file);
+      docs.push(snapshot);
+      if (name === own) doc.ozon = snapshot;
+    }
+    if (docs.length) ozon.mergeCloud(docs);
     return doc;
   }
   let lastPatch = 0, blockedUntil = 0;
@@ -2547,7 +2578,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
           return;
         }
         lastPatch = Date.now();
-        await gh("/gists/" + id, { method: "PATCH", body: JSON.stringify({ files: gistFiles(doc) }) });
+        await gh("/gists/" + id, { method: "PATCH", body: JSON.stringify({ files: gistFiles(doc,R) }) });
         lastRemote = mine;
       }
       lastSyncAt = Date.now();
@@ -2604,7 +2635,11 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
   }
   function onCode(v, fmt) {
     const now = Date.now();
-    if (v === lastVal && now - lastAt < 3000) return;
+    const counting = mode === "ozon" && ozon.counting();
+    if (v === lastVal && now - lastAt < (counting ? 1000 : 3000)) {
+      if (counting) lastAt = now; // Keep a continuously visible product from adding more units.
+      return;
+    }
     lastVal = v; lastAt = now;
     process(v);
     
@@ -2617,6 +2652,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
       if (video.readyState >= 2) {
         const found = await detector.detect(video);
         found.sort((a, b) => (a.format === "data_matrix" ? 1 : 0) - (b.format === "data_matrix" ? 1 : 0));
+        if (mode === "ozon" && ozon.counting() && found.length > 1) return setTimeout(camLoop, 150);
         for (const b of found) onCode(b.rawValue, b.format);
       }
     } catch (e) {}
@@ -2629,7 +2665,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
     } catch (e) {
       return fail("Нет доступа к камере. Разрешите камеру для этого сайта: значок замка в адресной строке → Разрешения → Камера.");
     }
-    camOn = true;
+    camOn = true; lastVal = "";
     $("camview").hidden = false;
     video.srcObject = stream;
     try { await video.play(); } catch (e) {}
@@ -2685,15 +2721,23 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
 
   // ---------- Ozon cargo units ----------
   function createOzonStation() {
-    const storageKey = "kiz-ozon-cargo-v1";
-    let data = null, template = null, stored = null, pending = null, importSequence = 0;
+    const formats = {
+      pieces: { key: "kiz-ozon-cargo-v1", sheet: "Состав грузомест", label: "QR по экземплярам",
+        fields: ["barcode","article","expiry","box","type","qr"],
+        headers: ["штрихкод товара","артикул товара","годен до","штрихкод грузоместа","тип грузоместа","qr-код"] },
+      counts: { key: "kiz-ozon-quantities-v1", sheet: "Состав ГМ поставки", label: "Количество по коробам",
+        fields: ["barcode","article","qty","zone","expiry","box","type"],
+        headers: ["шк товара","артикул товара","кол-во товаров","зона размещения","срок годности до в формате yyyy-mm-dd","шк гм","тип гм"] }
+    };
+    const preference = "kiz-ozon-active-format";
+    let kind = "pieces", data = null, template = null, stored = null, pending = null, importSequence = 0;
     function readTemplate(buf) {
       const wb = XLSX.read(buf, { type: "array" });
-      const sheet = wb.Workbook.Sheets.find((s) => s.name.trim().toLowerCase() === "состав грузомест");
-      if (!sheet) throw Error("В Excel нужен лист «Состав грузомест» из шаблона Ozon.");
+      const sheet = wb.Workbook.Sheets.find((s) => Object.values(formats).some((f) => f.sheet.toLowerCase() === s.name.trim().toLowerCase()));
+      if (!sheet) throw Error("Загрузите шаблон Ozon с листом «Состав грузомест» или «Состав ГМ поставки».");
+      const format = Object.keys(formats).find((k) => formats[k].sheet.toLowerCase() === sheet.name.trim().toLowerCase());
       const ws = wb.Sheets[sheet.name];
-      const fields = ["barcode","article","expiry","box","type","qr"];
-      const headers = ["штрихкод товара","артикул товара","годен до","штрихкод грузоместа","тип грузоместа","qr-код"];
+      const { fields, headers } = formats[format];
       const rows = [], cols = {}, boxes = new Map();
       const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
       let header = -1;
@@ -2706,7 +2750,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
         }
         if (fields.every((key) => key in found)) { Object.assign(cols, found); header = r; break; }
       }
-      if (header < 0) throw Error("В шаблоне не найдены шесть колонок состава грузомест Ozon.");
+      if (header < 0) throw Error("Проверьте заголовки колонок на листе «" + sheet.name + "».");
       for (let r = header + 1; r <= range.e.r; r++) {
         const row = { r };
         for (const key of fields) {
@@ -2718,6 +2762,12 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
         }
         if (!row.box && fields.some((k) => row[k])) throw Error("В строке " + (r + 1) + " отсутствует штрихкод грузоместа.");
         if (!row.box) continue;
+        if (format === "counts" && row.qty !== "") {
+          const qty = Number(row.qty);
+          if (!Number.isSafeInteger(qty) || qty < 0 || (qty && !row.barcode && !row.article))
+            throw Error("Проверьте товар и количество в строке " + (r + 1) + ".");
+          row.qty = qty;
+        }
         rows.push(row);
         if (!boxes.has(row.box)) boxes.set(row.box, []);
         boxes.get(row.box).push(row);
@@ -2729,31 +2779,155 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
         if (keys.has(key)) throw Error("В исходном шаблоне повторяется QR-код, строка " + (row.r + 1) + ".");
         keys.add(key);
       }
-      return { rows, boxes, cols, sheetId: sheet.id, range };
+      if (format === "counts") {
+        for (const group of boxes.values()) {
+          const barcodes = new Set(), articles = new Set();
+          for (const row of group) {
+            if ((row.barcode && barcodes.has(row.barcode)) || (row.article && articles.has(row.article)))
+              throw Error("В строке " + (row.r + 1) + " товар повторяется в одном грузоместе. Объедините количество в одну строку.");
+            if (row.barcode) barcodes.add(row.barcode);
+            if (row.article) articles.add(row.article);
+          }
+        }
+      }
+      return { rows, boxes, cols, sheetId: sheet.id, range, format };
+    }
+    // Store uniquely identified scans, including cancellations, so two devices can work offline.
+    function scanFields(row) {
+      const { box, barcode, article, expiry, zone = "", qr = "" } = row;
+      return { box, barcode, article, expiry, zone, qr };
+    }
+    function entriesOf(saved) {
+      if (saved.events) return saved.events;
+      // Existing per-piece supplies predate sync. The same saved QR gets the same key everywhere.
+      return Object.fromEntries(saved.items.map((row,i) => ["q:" + qrKey(row.qr), { t: i + 1, ...scanFields(row) }]));
+    }
+    function nextTime() {
+      return Math.max(Date.now(), (data.clock || data.items.length) + 1);
+    }
+    function eventEdit(id, fields) {
+      const t = nextTime();
+      return { clock: t, events: { ...entriesOf(data), [id]: { t, ...fields } } };
+    }
+    function sortedMap(map) {
+      return Object.fromEntries(Object.keys(map).sort().map((key) => [key,map[key]]));
+    }
+    function cloudVersion(saved) {
+      return { fileName: saved.fileName, b64: saved.b64, epoch: saved.epoch || 0, opened: saved.opened || 0,
+        events: sortedMap(entriesOf(saved)), meta: sortedMap(saved.meta || {}) };
+    }
+    function outgoing() {
+      const doc = {};
+      for (const [k, f] of Object.entries(formats)) {
+        const raw = localStorage.getItem(f.key);
+        if (raw) doc[k] = cloudVersion(JSON.parse(raw));
+      }
+      return Object.keys(doc).length ? doc : null;
+    }
+    function mergeMap(a,b) {
+      const result = { ...a };
+      for (const [k,v] of Object.entries(b)) {
+        const old = result[k];
+        if (!old || v.t > old.t) { result[k] = v; continue; }
+        if (v.t !== old.t) continue;
+        // Resolve simultaneous undo and scan in favour of undo; break other ties identically on every device.
+        if (!!v.removed !== !!old.removed) { if (v.removed) result[k] = v; }
+        else if (JSON.stringify(v) > JSON.stringify(old)) result[k] = v;
+      }
+      return sortedMap(result);
+    }
+    function combine(a,b) {
+      if (!a) return b;
+      if (a.epoch !== b.epoch) return a.epoch > b.epoch ? a : b;
+      if (a.b64 !== b.b64) return a.opened === b.opened ? (a.b64 > b.b64 ? a : b) : (a.opened > b.opened ? a : b);
+      return { fileName: a.fileName > b.fileName ? a.fileName : b.fileName, b64: a.b64, epoch: a.epoch, opened: Math.max(a.opened,b.opened),
+        events: mergeMap(a.events,b.events), meta: mergeMap(a.meta,b.meta) };
+    }
+    function groupKey(row) { return JSON.stringify([row.box,row.sku || row.barcode || row.article]); }
+    function materialize(version, parsed, previous) {
+      const counts = parsed.format === "counts", rows = new Map(), history = [], groups = new Map();
+      const originalCodes = new Set(parsed.rows.filter((r) => r.qr).map((r) => qrKey(r.qr)));
+      let last = parsed.range.e.r, clock = 0;
+      const events = Object.entries(version.events).sort(([ka,a],[kb,b]) => a.t - b.t || (ka < kb ? -1 : 1));
+      for (const [id, event] of events) {
+        clock = Math.max(clock,event.t);
+        if (event.removed) continue;
+        const group = parsed.boxes.get(event.box);
+        if (!group || (!counts && originalCodes.has(qrKey(event.qr)))) continue;
+        const key = groupKey(event);
+        let item = counts && groups.get(key);
+        if (!item) {
+          const available = group.filter((r) => !r.qr && !rows.has(r.r));
+          const target = available.find((r) => (r.barcode && r.barcode === event.barcode) || (r.article && r.article === event.article))
+            || available.find((r) => !r.barcode && !r.article);
+          const prototype = target || group[0];
+          item = { ...scanFields(event), r: target?.r ?? ++last, ref: prototype.r, type: prototype.type };
+          if (item.r > 1048575) throw Error("В листе Excel закончились строки.");
+          if (counts) {
+            item.sku = event.sku || event.barcode || event.article;
+            item.qty = Number(target?.qty || 0); groups.set(key,item);
+          }
+          rows.set(item.r,item);
+        }
+        if (counts) { item.qty++; history.push(id); }
+      }
+      for (const [key, edit] of Object.entries(version.meta)) {
+        clock = Math.max(clock,edit.t);
+        const [group,field] = JSON.parse(key);
+        if (groups.has(group) && ["article","expiry","zone"].includes(field)) groups.get(group)[field] = edit.value;
+      }
+      const same = previous && previous.b64 === version.b64 && (previous.epoch || 0) === version.epoch;
+      const box = same && parsed.boxes.has(previous.box) ? previous.box : parsed.boxes.size === 1 ? parsed.boxes.keys().next().value : "";
+      let selection = same && !counts ? { barcode:previous.barcode, article:previous.article, expiry:previous.expiry } : resetProduct();
+      if (counts) {
+        const old = same && previous.items.find((r) => r.r === previous.selected);
+        const selected = old && groups.get(groupKey(old));
+        selection = selected ? countSelection(selected) : { ...resetProduct(), selected:null, zone:"" };
+      }
+      return { ...version, clock, box, ...selection, items:[...rows.values()], ...(counts ? { history } : {}) };
+    }
+    function mergeCloud(docs) {
+      let changed = false;
+      for (const [k,f] of Object.entries(formats)) {
+        const raw = localStorage.getItem(f.key), saved = raw && JSON.parse(raw);
+        const local = saved && cloudVersion(saved);
+        let version = local;
+        for (const doc of docs) if (doc?.[k]?.b64) version = combine(version,doc[k]);
+        if (!version || JSON.stringify(local) === JSON.stringify(version)) continue;
+        const parsed = readTemplate(b64ToBuf(version.b64));
+        if (parsed.format !== k) throw Error("Формат шаблона Ozon при синхронизации не совпал.");
+        const next = materialize(version,parsed,saved);
+        const text = JSON.stringify(next);
+        localStorage.setItem(f.key,text); changed = true;
+        if (kind === k || !data) {
+          kind = k; data = next; template = parsed; stored = text; pending = null; rememberFormat();
+        }
+      }
+      if (changed) renderStation();
     }
     function qrKey(qr) { return qr.replace(/\x1d/g, ""); }
-    function restoreStation() {
-      const raw = localStorage.getItem(storageKey);
+    function restoreStation(nextKind = kind) {
+      const raw = localStorage.getItem(formats[nextKind].key);
       const saved = raw ? JSON.parse(raw) : null;
       const parsed = saved ? readTemplate(b64ToBuf(saved.b64)) : null;
-      data = saved; template = parsed; stored = raw;
+      kind = nextKind; data = saved; template = parsed; stored = raw;
     }
     function commit(next) {
-      if (localStorage.getItem(storageKey) !== stored) {
+      if (localStorage.getItem(formats[kind].key) !== stored) {
         restoreStation(); renderStation();
         throw Error("Сборка изменилась в другой вкладке. Проверьте грузоместо и повторите действие.");
       }
       const raw = JSON.stringify(next);
-      try { localStorage.setItem(storageKey, raw); }
+      try { localStorage.setItem(formats[kind].key, raw); }
       catch (err) { throw Error("Не удалось сохранить изменение на устройстве. Скачайте текущий Excel."); }
-      stored = raw; data = next;
+      stored = raw; data = next; scheduleSync();
     }
     function resetProduct() { return { barcode: "", article: "", expiry: "" }; }
     function focusScan() { scan.focus({ preventScroll: true }); }
     function run(action) { try { action(); } catch (e) { fail(e.message || "Не удалось изменить сборку."); } }
     function chooseBox(box) {
       if (!template?.boxes.has(box)) return;
-      commit({ ...data, box, ...resetProduct() }); hideMsg(); renderStation(); focusScan();
+      commit({ ...data, box, ...resetProduct(), ...(kind === "counts" ? { selected: null, zone: "" } : {}) }); hideMsg(); renderStation(); focusScan();
     }
     function chooseProduct(barcode) {
       if (/^01\d{14}21/.test(barcode) || /^https?:\/\//i.test(barcode) || barcode.includes(GS))
@@ -2794,7 +2968,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
       if (r > 1048575) throw Error("В листе Excel закончились строки.");
       const prototype = target || group.find(blank) || group[0];
       const item = { r, ref: prototype.r, box: data.box, barcode: data.barcode, article, expiry, type: prototype.type, qr };
-      commit({ ...data, items: [...data.items, item] });
+      commit({ ...data, ...eventEdit("q:" + key,scanFields(item)), items: [...data.items, item] });
       renderStation(); beep("kiz"); note("ok", "QR-код записан. Сканируйте следующий экземпляр.");
       flash("ok", "✓", article || data.barcode, "В грузоместе " + countBox(data.box) + " шт.");
     }
@@ -2804,23 +2978,92 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
         if (pending) throw Error("Сначала подтвердите или отмените замену шаблона.");
         if (template.boxes.has(v)) return chooseBox(v);
         if (!data.box) throw Error("Выберите или сканируйте грузоместо из шаблона.");
+        if (kind === "counts") return addCount(v);
         if (!data.barcode) return chooseProduct(v);
         record(v);
       });
+    }
+    function countedRows() {
+      const rows = new Map(template.rows.map((row) => [row.r, row]));
+      for (const item of data.items) rows.set(item.r, item);
+      return [...rows.values()];
+    }
+    function withCountRow(item) {
+      return data.items.filter((row) => row.r !== item.r).concat(item);
+    }
+    function countSelection(row) {
+      return { selected: row.r, barcode: row.barcode || row.article, article: row.article, expiry: row.expiry, zone: row.zone };
+    }
+    function addCount(code) {
+      if (code.length > 32767 || code.includes(GS) || /^01\d{14}21/.test(code) || /^https?:\/\//i.test(code))
+        throw Error("Для подсчёта сканируйте штрихкод товара с этикетки.");
+      const rows = countedRows(), group = rows.filter((r) => r.box === data.box);
+      const known = rows.find((r) => r.barcode === code);
+      const knownArticle = known?.article || "";
+      let row = group.find((r) => r.barcode === code || (r.article && (r.article === code || r.article === knownArticle)));
+      if (!row) row = group.find((r) => !r.barcode && !r.article);
+      if (!row) {
+        const r = rows.reduce((last, entry) => Math.max(last,entry.r), template.range.e.r) + 1;
+        if (r > 1048575) throw Error("В листе Excel закончились строки.");
+        const prototype = template.boxes.get(data.box)[0];
+        row = { r, ref: prototype.r, type: prototype.type, box: data.box, zone: "", expiry: "", article: "", barcode: "", qty: 0 };
+      }
+      const qty = Number(row.qty || 0) + 1;
+      if (!Number.isSafeInteger(qty)) throw Error("Количество слишком велико для Excel.");
+      const barcode = row.barcode || (row.article && code === row.article ? "" : code);
+      const item = { ...row, ref: row.ref ?? row.r, barcode, article: row.article || knownArticle, qty };
+      const id = "c:" + uuid();
+      item.sku = row.sku || row.barcode || row.article || code;
+      for (const field of ["article","expiry","zone"]) {
+        const edit = data.meta?.[JSON.stringify([groupKey(item),field])];
+        if (edit) item[field] = edit.value;
+      }
+      commit({ ...data, ...eventEdit(id,{ ...scanFields(item), sku:item.sku }), items: withCountRow(item), history: [...data.history,id], ...countSelection(item) });
+      renderStation(); beep("barcode"); hideMsg();
+      flash("ok","+1",item.article || item.barcode,qty + " шт. в этом коробе");
+    }
+    function updateCountField(field, value) {
+      const item = data.items.find((r) => r.r === data.selected);
+      if (!item) return;
+      if (field === "article" && value && countedRows().some((r) => r.r !== item.r && r.box === item.box && r.article === value))
+        throw Error("В этом коробе уже есть строка с таким артикулом. Отсканируйте артикул или его штрихкод из шаблона.");
+      if (field === "article" && !value && !item.barcode) throw Error("Для товара нужен артикул или штрихкод.");
+      const updated = { ...item, [field]: value };
+      const t = nextTime(), key = JSON.stringify([groupKey(item),field]);
+      commit({ ...data, clock:t, meta:{ ...data.meta, [key]:{ t,value } }, items: withCountRow(updated), ...countSelection(updated) });
+    }
+    function undoCount() {
+      if (!data?.history.length) return;
+      const id = data.history[data.history.length - 1], item = data.events[id];
+      const updated = { ...data, ...eventEdit(id,{ removed:true }) };
+      commit(materialize(cloudVersion(updated),template,data));
+      renderStation(); note("warn","Отменён один скан: " + (item.article || item.barcode) + " · короб " + item.box + "."); focusScan();
     }
     function countBox(box) {
       return (template.boxes.get(box) || []).filter((r) => r.qr).length + data.items.filter((r) => r.box === box).length;
     }
     function renderStation() {
       if (mode !== "ozon") return;
-      $("title").textContent = "Ozon FBS · состав грузомест";
+      const counts = kind === "counts";
+      $("title").textContent = "Ozon · состав грузомест";
+      $("ozswitchlabel").hidden = !data || !localStorage.getItem(formats[counts ? "pieces" : "counts"].key);
+      $("ozformat").textContent = data ? formats[kind].label : "Состав грузомест";
+      $("ozswitch").value = kind;
+      if (pending) $("ozreplaceprompt").textContent = "Заменить сборку «" + formats[pending.template.format].label + "» новым шаблоном?";
       $("fileinfo").textContent = data?.fileName || "Заполнение шаблона поставки";
-      $("undo").disabled = !data?.items.length;
+      $("undo").disabled = counts ? !data?.history.length : !data?.items.length;
       $("ozcontrols").hidden = $("ozsummary").hidden = !data;
       $("ozreplace").hidden = !pending;
       const barcode = data?.barcode || "";
       $("ozartlabel").hidden = $("ozdates").hidden = $("ozchange").disabled = !barcode;
-      const total = data ? template.rows.filter((r) => r.qr).length + data.items.length : 0;
+      $("ozchange").hidden = counts;
+      $("ozzonelabel").hidden = !counts;
+      $("ozdetailslabel").textContent = counts ? "Зона и срок годности" : "Срок годности";
+      $("ozlistlabel").textContent = counts ? "Товары в грузоместе" : "Последние экземпляры";
+      const counted = counts && data ? countedRows().filter((r) => r.qty > 0) : [];
+      const inBox = counted.filter((r) => r.box === data?.box);
+      const sum = (list) => list.reduce((n,r) => n + r.qty, 0);
+      const total = !data ? 0 : counts ? sum(counted) : template.rows.filter((r) => r.qr).length + data.items.length;
       $("ozexport").disabled = !total;
       if (data) {
         $("ozbox").replaceChildren(new Option("Выберите грузоместо", ""), ...[...template.boxes.keys()].map((box) => new Option(box,box)));
@@ -2828,30 +3071,55 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
         $("ozbox").value = data.box;
         if (document.activeElement !== $("ozarticle")) $("ozarticle").value = data.article;
         if (document.activeElement !== $("ozdate")) $("ozdate").value = data.expiry;
-        $("ozcount").textContent = "Всего " + total + " шт." + (data.box ? " · в грузоместе " + countBox(data.box) : "");
-        const recent = template.rows.filter((r) => r.qr).concat(data.items).slice(-10).reverse();
-        $("ozrecent").innerHTML = recent.map((r) => "<li>" + esc(r.article || r.barcode) + ' · <span class="mono">' + kizHtml(r.qr) + "</span></li>").join("");
+        if (counts && document.activeElement !== $("ozzone")) $("ozzone").value = data.zone || "";
+        $("ozcount").textContent = "Всего " + total + " шт." + (data.box ? " · в грузоместе " + (counts ? sum(inBox) : countBox(data.box)) : "");
+        const recent = counts ? [] : template.rows.filter((r) => r.qr).concat(data.items).slice(-10).reverse();
+        $("ozrecent").innerHTML = counts ? inBox.map((r) => "<li>" + esc(r.article || r.barcode) + " · " + r.qty + " шт.</li>").join("") : recent.map((r) => "<li>" + esc(r.article || r.barcode) + ' · <span class="mono">' + kizHtml(r.qr) + "</span></li>").join("");
+      }
+      if (counts && data?.box) {
+        scan.placeholder = "Штрихкод товара";
+        $("step").className = "step";
+        const last = inBox.find((r) => r.r === data.selected);
+        const hint = last ? esc(last.article || last.barcode) + " · " + last.qty + " шт. в этом коробе" : "Каждый скан добавляет одну штуку в выбранное грузоместо.";
+        $("step").innerHTML = '<div class="badge">+1</div><div class="title">Сканируйте штрихкод товара</div><div class="sub">' + hint + "</div>";
+        return;
       }
       const title = !data ? "Загрузите шаблон Ozon" : !data.box ? "Выберите грузоместо" : !barcode ? "Сканируйте штрихкод товара" : "Сканируйте QR-код экземпляра";
       scan.placeholder = !data ? "Загрузите шаблон Ozon" : !data.box ? "Штрихкод грузоместа" : barcode ? "QR-код экземпляра" : "Штрихкод товара";
       $("step").className = barcode ? "step kiz" : "step";
-      const hint = !data ? "Выберите Excel с листом «Состав грузомест»." : !data.box ? "Сканируйте этикетку короба или выберите его из списка." : !barcode ?
+      const hint = !data ? "Загрузите Excel с QR по экземплярам или количеством по коробам." : !data.box ? "Сканируйте этикетку короба или выберите его из списка." : !barcode ?
         "Для одинаковых товаров штрихкод достаточно считать один раз." : (data.article || barcode) + " · " + data.box;
       $("step").innerHTML = '<div class="badge">' + (barcode ? "2" : "1") + '</div><div class="title">' + title + '</div><div class="sub">' + esc(hint) + "</div>";
     }
     function undoScan() {
       run(() => {
+        if (kind === "counts") return undoCount();
         if (!data?.items.length) return;
-        commit({ ...data, items: data.items.slice(0,-1) }); renderStation();
+        const last = data.items[data.items.length - 1];
+        commit({ ...data, ...eventEdit("q:" + qrKey(last.qr),{ removed:true }), items: data.items.slice(0,-1) }); renderStation();
         note("warn","Последний QR-код удалён из шаблона."); focusScan();
       });
     }
     function installPending() {
       const incoming = pending;
       if (!incoming) return;
-      commit(incoming.data); template = incoming.template; pending = null;
+      const next = incoming.template.format;
+      if (localStorage.getItem(formats[next].key) !== incoming.expected) {
+        pending = null; restoreStation(); renderStation();
+        throw Error("Сборка изменилась в другой вкладке. Загрузите файл ещё раз.");
+      }
+      // Switch only once the new workbook has been stored successfully.
+      const raw = JSON.stringify(incoming.data);
+      try { localStorage.setItem(formats[next].key, raw); }
+      catch (e) { pending = null; renderStation(); throw Error("Не хватает места для нового шаблона на этом устройстве."); }
+      kind = next; stored = raw; data = incoming.data;
+      template = incoming.template; pending = null; rememberFormat(); scheduleSync();
       renderStation(); hideMsg(); focusScan();
     }
+    function rememberFormat() { try { localStorage.setItem(preference,kind); } catch (e) {} }
+    $("ozswitch").addEventListener("change", (e) => run(() => {
+      ++importSequence; pending = null; restoreStation(e.target.value); rememberFormat(); hideMsg(); renderStation(); focusScan();
+    }));
     $("ozload").addEventListener("click", () => $("ozfile").click());
     $("ozfile").addEventListener("change", async (e) => {
       const f = e.target.files[0]; e.target.value = "";
@@ -2861,18 +3129,32 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
         const buf = await f.arrayBuffer();
         if (currentImport !== importSequence) return;
         const b64 = bufToB64(buf);
-        if (data?.b64 === b64) { pending = null; renderStation(); note("ok","Этот шаблон уже открыт. Сканирование можно продолжить."); return; }
-        const parsed = readTemplate(buf), boxes = [...parsed.boxes.keys()];
-        pending = { template: parsed, data: { fileName: f.name, b64, items: [], box: boxes.length === 1 ? boxes[0] : "", ...resetProduct() } };
-        if (data?.items.length) renderStation(); else installPending();
+        const parsed = readTemplate(buf), next = parsed.format;
+        const expected = localStorage.getItem(formats[next].key), saved = expected && JSON.parse(expected);
+        if (saved?.b64 === b64) {
+          restoreStation(next); rememberFormat(); renderStation(); focusScan();
+          note("ok","Этот шаблон уже открыт. Сканирование можно продолжить."); return;
+        }
+        const boxes = [...parsed.boxes.keys()];
+        const opened = Date.now();
+        const initial = { fileName: f.name, b64, events:{}, meta:{}, opened, epoch:saved ? Math.max(opened,(saved.epoch || 0)+1) : 0, items: [], box: boxes.length === 1 ? boxes[0] : "", ...resetProduct() };
+        if (next === "counts") Object.assign(initial, { history: [], selected: null, zone: "" });
+        pending = { template: parsed, expected, data: initial };
+        if (saved?.items.length) renderStation(); else installPending();
       } catch (err) { fail(err.message || "Не удалось прочитать Excel."); }
     });
     $("ozyes").addEventListener("click", () => run(installPending));
     $("ozno").addEventListener("click", () => { pending = null; renderStation(); focusScan(); });
     $("ozbox").addEventListener("change", (e) => run(() => chooseBox(e.target.value)));
     $("ozchange").addEventListener("click", () => run(() => chooseBox(data.box)));
-    for (const [id, field] of [["ozarticle","article"],["ozdate","expiry"]]) {
-      $(id).addEventListener("change", (e) => run(() => { commit({ ...data, [field]: e.target.value.trim() }); renderStation(); }));
+    for (const [id, field] of [["ozarticle","article"],["ozdate","expiry"],["ozzone","zone"]]) {
+      $(id).addEventListener("change", (e) => run(() => {
+        const value = e.target.value.trim();
+        if (kind === "counts") {
+          try { updateCountField(field,value); } catch (err) { e.target.value = data[field] || ""; throw err; }
+        } else commit({ ...data, [field]: value });
+        renderStation();
+      }));
       $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); focusScan(); } });
     }
 
@@ -2906,7 +3188,7 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
       }
       const originals = new Map(template.rows.map((r) => [r.r, r]));
       let last = template.range.e.r;
-      for (const item of data.items) {
+      for (const item of [...data.items].sort((a,b) => a.r - b.r)) {
         let row = rows.get(item.r);
         if (!row) {
           row = rows.get(item.ref).cloneNode(false); row.setAttribute("r", item.r + 1);
@@ -2924,7 +3206,10 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
             const next = [...row.children].find((c) => XLSX.utils.decode_cell(c.getAttribute("r")).c > col);
             row.insertBefore(cell, next || null);
           }
-          cellText(cell,item[field]);
+          if (field === "qty") {
+            const value = create("v"); value.textContent = String(item.qty);
+            cell.replaceChildren(value); cell.setAttribute("t","n");
+          } else cellText(cell,item[field]);
         }
         last = Math.max(last,item.r);
       }
@@ -2942,10 +3227,11 @@ body[data-mode="ozon"] :is(.fbsonly, .fboonly, #upd, #bigstat, #syncbox) { displ
       } catch (e) { fail(e.message || "Не удалось выгрузить шаблон."); }
     });
     window.addEventListener("storage", (e) => {
-      if (e.key === storageKey || e.key === null) run(() => { restoreStation(); pending = null; renderStation(); });
+      if (e.key === formats[kind].key || e.key === null) run(() => { restoreStation(); pending = null; renderStation(); });
+      else if (Object.values(formats).some((f) => f.key === e.key)) renderStation();
     });
-    try { restoreStation(); } catch (e) { if (mode === "ozon") fail("Не удалось открыть сохранённую сборку Ozon."); }
-    return { render: renderStation, scan: processScan, undo: undoScan };
+    try { restoreStation(localStorage.getItem(preference) === "counts" ? "counts" : "pieces"); } catch (e) { if (mode === "ozon") fail("Не удалось открыть сохранённую сборку Ozon."); }
+    return { render: renderStation, scan: processScan, undo: undoScan, counting: () => kind === "counts", outgoing, mergeCloud };
   }
 
   // ---------- boot ----------
