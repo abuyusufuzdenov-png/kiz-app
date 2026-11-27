@@ -332,6 +332,16 @@ body { margin: 0; }
 .shopname strong { overflow-wrap: anywhere; }
 .shopname span { color: var(--muted); }
 #rows .variant { overflow-wrap: anywhere; }
+#rows .size-value { display: inline-block; max-width: 100%; padding: 2px 9px; border: 1px solid var(--line);
+  border-radius: 6px; background: var(--accent-soft); color: var(--ink); font-size: 18px; font-weight: 700;
+  font-variant-numeric: tabular-nums; line-height: 1.35; }
+#rows .size-missing { color: var(--muted); font-size: 14px; }
+@media (min-width: 641px) {
+  #rows .article-value { display: block; width: max-content; max-width: 23ch; }
+  #rows .size-value { width: max-content; max-width: 15ch; }
+  #rows .size-missing { white-space: nowrap; }
+  #rows .kizcell { max-width: clamp(115px, 16vw, 200px); }
+}
 #rows .variant small { color: var(--muted); font-size: 12px; }
 @media (max-width: 640px) {
   body[data-mode="fbs"] header { display: block; position: relative; }
@@ -1334,6 +1344,12 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
 
   // tasks deleted by hand (order cancelled): removed[sheetRow] = { on, t }; the rows stay in allRows so a deletion can be undone
   function applyRemoved(shop = state) {
+    for (const row of shop.allRows) {
+      const removal = shop.removed[row.r];
+      // A scan from a second device takes precedence over a cleanup of empty orders.
+      if (row.kiz && removal?.on && removal.onlyEmpty)
+        shop.removed[row.r] = {on:false, t:Math.max(removal.t, shop.kizT[row.r] || 0) + 1};
+    }
     shop.rows = shop.allRows.filter((r) => !shop.removed[r.r]?.on);
   }
   function hashStr(t) { let h = 5381; for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return (h >>> 0).toString(36) + t.length; }
@@ -1694,6 +1710,8 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       try { storeShopName(shop.id, {v:value, t:Math.max(Date.now(), (shopNames[shop.id]?.t || 0) + 1)}, true); }
       catch { return fail("Не удалось сохранить название магазина."); }
       render(); scheduleSync();
+    } else if (e.target.closest("[data-remove-empty]")) {
+      removeEmptyTasks(shop);
     } else if (e.target.closest("[data-sizes]")) {
       sizeShop = shop; $("sizefile").click();
     } else if (e.target.closest("[data-pick],[data-reset]")) {
@@ -1926,7 +1944,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     const item = state.allRows.find((x) => x.r === r);
     if (item?.kiz && kizOwner(kizKey(item.kiz), item)) return fail("КИЗ этого задания уже используется. Сначала освободите код.");
     state.selected = null;
-    state.removed[r] = { on: false, t: Date.now() };
+    state.removed[r] = { on: false, t: Math.max(Date.now(), state.removed[r].t + 1) };
     applyRemoved(); save(); render();
     const row = state.rows.find((x) => x.r === r);
     note("ok", "Задание " + (row ? rowLabel(row) : "") + " снова в списке" + (row && row.kiz ? " вместе с КИЗ." : ". Отсканируйте его стикер, затем КИЗ."));
@@ -1941,6 +1959,35 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     state.selected = null;
     applyRemoved(); save(); render();
     note("warn", "Задание " + rowLabel(row) + " удалено" + (row.kiz ? " вместе с КИЗ" : "") + " — его не будет в файле для WB и в УПД. Вернуть — «Отменить последний».");
+  }
+
+  function removeEmptyTasks(shop) {
+    mergeOtherTab(shop);
+    const ids = shop.rows.filter(row => !row.kiz).map(row => row.r);
+    if (!ids.length) { render(); return note("ok", "Все задания этого магазина уже заполнены."); }
+    const file = shop.fileId, generation = shop.resetId;
+    if (!window.confirm(shop.label + " — удалить все задания без КИЗ (" + ids.length + ")?")) return;
+    mergeOtherTab(shop);
+    if (file !== shop.fileId || generation !== shop.resetId) {
+      render();
+      return note("warn", "Сборка изменилась. Проверьте задания и повторите удаление.");
+    }
+    const candidates = new Set(ids);
+    const rows = shop.rows.filter(row => candidates.has(row.r) && !row.kiz);
+    if (!rows.length) { render(); return note("ok", "Заданий без КИЗ для удаления уже нет."); }
+    const next = {...shop, removed:{...shop.removed}, selected:null};
+    const batch = [];
+    for (const row of rows) {
+      const t = Math.max(Date.now(), (next.removed[row.r]?.t || 0) + 1);
+      next.removed[row.r] = {on:true, onlyEmpty:true, t};
+      batch.push({r:row.r, t});
+    }
+    applyRemoved(next);
+    try { persist(next); } catch { return fail("Не удалось сохранить удаление заданий на устройстве."); }
+    Object.assign(shop,next);
+    shop.history.push({seq:++actionSeq, batch});
+    scheduleSync(); render();
+    note("ok", shop.label + ". Удалено заданий без КИЗ: " + batch.length + ".");
   }
 
   function clearKiz(i) {
@@ -1958,6 +2005,21 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     if (!shop) return;
     chooseScanShop(shop);
     const h = state.history[state.history.length - 1];
+    if (h.batch) {
+      state.history.pop();
+      state.selected = null;
+      let restored = 0;
+      for (const item of h.batch) {
+        const removal = state.removed[item.r];
+        if (!removal?.on || !removal.onlyEmpty || removal.t !== item.t) continue;
+        state.removed[item.r] = {on:false, t:Math.max(Date.now(), item.t + 1)};
+        restored++;
+      }
+      applyRemoved(); save(); render();
+      note("ok", state.label + ". Восстановлено заданий: " + restored + ".");
+      scan.focus({preventScroll:true});
+      return;
+    }
     const prior = h.restore != null ? state.allRows.find((r) => r.r === h.restore)?.kiz : h.prev;
     const entry = state.allRows.find((r) => r.r === (h.restore ?? h.r));
     if (prior && kizOwner(kizKey(prior), entry)) return fail("Прежний КИЗ уже используется в другом задании.");
@@ -2106,7 +2168,8 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
         '<span class="file filename" title="' + esc(shop.fileName) + '">' + (shop.demo ? "Нет задания" : "<bdi>" + esc(shop.fileName) + "</bdi>") + '</span>' +
         (shop.demo ? "" : '<span class="file shopcount">Собрано ' + filled + ' из ' + shop.rows.length + '</span>') +
         '</div><div class="gbtns"><button type="button" data-pick>' + (shop.demo ? 'Загрузить Excel' : 'Дополнить задание') + '</button>' +
-        (shop.demo ? "" : '<button type="button" data-docs>Файлы</button><button type="button" data-sizes>Размеры из PDF</button><button type="button" data-reset>Загрузить со сбросом</button>') + '</div></article>';
+        (shop.demo ? "" : '<button type="button" data-docs>Файлы</button><button type="button" data-sizes>Размеры из PDF</button><button type="button" data-reset>Загрузить со сбросом</button>' +
+          '<button type="button" data-remove-empty' + (filled === shop.rows.length ? ' disabled' : '') + '>Удалить задания без КИЗ</button>') + '</div></article>';
     }).join("");
     $("scopelabel").hidden = loaded.length < 2;
     for (const shop of shops) {
@@ -2160,14 +2223,16 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     renderUpd();
     const tb = $("rows");
     tb.innerHTML = displayed.flatMap((shop) => shop.rows.map((r, i) => {
+      const size = sizeOf(shop,r);
       const selected = state === shop && state.selected === i;
       const cls = [r.kiz ? "done" : "", selected ? "sel" : "", r.kiz && !showDone && !selected && done !== total ? "hidedone" : ""].join(" ");
       return '<tr data-shop="' + shop.id + '" data-i="' + i + '" class="' + cls + '">' +
         '<td class="num">' + esc(r.order) + "</td>" +
         '<td class="num">' + stickerHtml(r.sticker) + "</td>" +
         '<td class="name">' + esc(r.name) + (loaded.length > 1 ? "<small>" + esc(shop.label) + "</small>" : "") + (r.brand ? "<small>" + esc(r.brand) + "</small>" : "") + "</td>" +
-        '<td class="variant"><small class="mobonly">Артикул</small><b>' + esc(r.article || "—") + "</b></td>" +
-        '<td class="variant"><small class="mobonly">Размер</small><b>' + esc(sizeOf(shop,r) || "—") + "</b></td>" +
+        '<td class="variant"><small class="mobonly">Артикул</small><b class="article-value">' + esc(r.article || "—") + "</b></td>" +
+        '<td class="variant"><small class="mobonly">Размер</small>' +
+          (size ? '<b class="size-value">' + esc(size) + '</b>' : '<span class="size-missing">Не указан</span>') + "</td>" +
         '<td class="kizcell" title="' + esc(r.kiz.split(GS).join("␝")) + '">' +
           (r.kiz ? kizHtml(r.kiz) : '<span class="chip wait">ждёт КИЗ</span>') + "</td>" +
         '<td class="acts">' + (r.kiz ? '<button class="x" type="button" data-edit="' + i + '" aria-label="Изменить КИЗ" title="Изменить КИЗ">✎</button><button class="x" type="button" data-clear="' + i + '" aria-label="Удалить КИЗ" title="Удалить КИЗ">×</button>' : "") +
