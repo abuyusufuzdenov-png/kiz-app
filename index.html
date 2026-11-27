@@ -349,6 +349,8 @@ body { margin: 0; }
   .shopgrid[data-loaded="1"] .shopcount, .shopcard.empty .file { display: none; }
   .shopcard .gbtns { margin: 0; align-items: center; justify-content: end; }
   .shopcard button { min-height: 44px; padding: 6px 9px; }
+  .shopcard:not(.empty) { grid-template-columns: minmax(0,1fr); }
+  .shopcard:not(.empty) .gbtns { justify-content: start; flex-wrap: wrap; gap: 4px 6px; }
   .shopcard [data-docs] { background: var(--accent-soft); }
 
   .fbs-meter { padding: 2px 2px 4px; }
@@ -682,11 +684,12 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
 
   function emptyShop(id) {
     return { id, label: "Магазин " + (id + 1), demo: true, fileName: "", b64: "", sheetName: "",
-      cols: {}, rows: [], allRows: [], selected: null, history: [], kizMode: "full", kizT: {}, removed: {} };
+      resetId: "", cumulative: false, cols: {}, rows: [], allRows: [], selected: null, history: [], kizMode: "full", kizT: {}, removed: {} };
   }
   const shops = [emptyShop(0), emptyShop(1)];
   let state = shops[0]; // shop owning the current scan
   let docShop = shops[0], scope = "all", importShop = shops[0], actionSeq = 0;
+  let importReset = false;
   function visibleShops() {
     return shops.filter((s) => !s.demo && (scope === "all" || s.id === Number(scope)));
   }
@@ -1316,12 +1319,23 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
 
   // The first shop keeps the original storage key so existing jobs open in place.
   function shopKey(key, shop) { return shop.id === 0 ? key : key + "-shop2"; }
+  const savedShopText = new Map();
+  function mergeOtherTab(shop) {
+    const text = localStorage.getItem(shopKey(STORE,shop));
+    if (!text || text === savedShopText.get(shop.id)) return;
+    const saved = JSON.parse(text), kiz = {};
+    for (const r of new Set([...Object.keys(saved.kiz || {}),...Object.keys(saved.kizT || {})]))
+      kiz[r] = {v:saved.kiz?.[r] || "",t:saved.kizT?.[r] || 1};
+    mergeShop(shop,{...saved,kiz});
+  }
   function persist(shop) {
     if (shop.demo) return;
+    mergeOtherTab(shop);
     const kiz = {};
     shop.allRows.forEach((r) => { if (r.kiz || shop.kizT[r.r]) kiz[r.r] = r.kiz; });
-    const { fileName, b64, kizMode, kizT, fileT, fileId, removed } = shop;
-    localStorage.setItem(shopKey(STORE, shop), JSON.stringify({ fileName, b64, kiz, kizMode, kizT, fileT, fileId, removed }));
+    const { fileName, b64, kizMode, kizT, fileT, fileId, removed, resetId, cumulative } = shop;
+    const text = JSON.stringify({ fileName, b64, kiz, kizMode, kizT, fileT, fileId, removed, resetId, cumulative });
+    localStorage.setItem(shopKey(STORE, shop),text); savedShopText.set(shop.id,text);
   }
   function save(shop = state) {
     try { persist(shop); } catch (e) {
@@ -1332,15 +1346,17 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
   }
   function restore(shop) {
     try {
-      const s = JSON.parse(localStorage.getItem(shopKey(STORE, shop)) || "null");
+      const text = localStorage.getItem(shopKey(STORE,shop)), s = JSON.parse(text || "null");
       if (!s || !s.b64) return;
       const values = Object.assign({}, s.kiz);
       // Older saves omitted empty cells, including codes explicitly cleared by the user.
       Object.keys(s.kizT || {}).forEach((r) => { if (!(r in values)) values[r] = ""; });
       Object.assign(shop, parseWorkbook(b64ToBuf(s.b64), s.fileName, values));
       shop.kizT = s.kizT || {}; shop.removed = s.removed || {}; shop.fileT = s.fileT || 0;
+      shop.resetId = s.resetId || ""; shop.cumulative = !!s.cumulative;
       shop.kizMode = s.kizMode || "full";
       applyRemoved(shop);
+      savedShopText.set(shop.id,text);
     } catch (e) {
       $("storagewarn").hidden = false;
       $("storagewarn").textContent = "Не удалось открыть сохранённый файл. " + shop.label + ".";
@@ -1402,40 +1418,118 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     if (!rows.length) throw new Error("В файле нет строк со стикерами.");
     const b64 = bufToB64(buf);
     return { demo: false, fileName, b64, fileId: fileName + ":" + hashStr(b64), sheetName: found.name,
-      cols, allRows: rows, rows, selected: null, history: [], kizT: {}, removed: {} };
+      headerRow:found.hr, cols, allRows: rows, rows, selected: null, history: [], kizT: {}, removed: {} };
   }
 
-  // Workbook row numbers change when WB adds, reorders or removes jobs.
-  function forMatchingRows(target, source, visit) {
-    function bySticker(rows) {
-      const map = new Map();
-      for (const row of rows) {
-        if (!map.has(row.sticker)) map.set(row.sticker, []);
-        map.get(row.sticker).push(row);
+  // Match by WB sticker and task, independent of row order or workbook name.
+  function pairJobs(source, target) {
+    const stickers = new Map(), pairs = new Map(), used = new Set();
+    for (const r of target.allRows) {
+      if (!stickers.has(r.sticker)) stickers.set(r.sticker,[]);
+      stickers.get(r.sticker).push(r);
+    }
+    // Reserve exact task numbers before matching older sheets without that column.
+    for (const exact of [true,false]) for (const row of source.allRows) {
+      if (pairs.has(row.r)) continue;
+      let hits = (stickers.get(row.sticker) || []).filter(r => !used.has(r.r) &&
+        (exact ? r.order === row.order : !r.order || !row.order));
+      if (hits.length > 1 && row.article) {
+        const same = hits.filter(r => r.article === row.article);
+        if (same.length) hits = same;
       }
-      return map;
+      if (hits.length > 1 && (!exact || hits.some(r => r.article !== hits[0].article)))
+        throw Error("Не удалось сопоставить повторяющийся стикер " + row.sticker + ". Проверьте номера заданий в Excel.");
+      if (hits.length) { pairs.set(row.r,hits[0].r); used.add(hits[0].r); }
     }
-    const from = bySticker(source.allRows), to = bySticker(target.allRows);
-    for (const row of target.allRows) {
-      const matches = (map) => (map.get(row.sticker) || []).filter((r) => !r.order || !row.order || r.order === row.order);
-      const candidates = matches(from);
-      if (candidates.length === 1 && matches(to).length === 1) visit(row, candidates[0]);
-    }
+    return pairs;
   }
 
-  function importWorkbook(shop, buf, fileName) {
-    const next = Object.assign(emptyShop(shop.id), parseWorkbook(buf, fileName), { kizMode: shop.kizMode, fileT: Date.now() });
+  function wbSheet(shop) {
+    const wb = XLSX.read(b64ToBuf(shop.b64),{type:"array"});
+    const ws = wb.Sheets[shop.sheetName], range = XLSX.utils.decode_range(ws["!ref"]);
+    return { wb,ws,range };
+  }
+
+  // The workbook is also the source for reloads, cloud sync and the original WB export.
+  // Append actual Excel rows, aligning the two templates by their headers.
+  function appendJobRows(base, source, additions, pairs) {
+    const dst = wbSheet(base), src = wbSheet(source);
+    const addr = (r,c) => XLSX.utils.encode_cell({r,c});
+    function columns(part, shop) {
+      const result = new Map(), seen = new Map();
+      const roles = new Map(Object.entries(shop.cols).map(([k,c]) => [c,k]));
+      for (let c = part.range.s.c; c <= part.range.e.c; c++) {
+        const rel = c - part.range.s.c, cell = part.ws[addr(part.range.s.r + shop.headerRow,c)];
+        const label = String(cell?.v ?? "").trim().toLowerCase();
+        const key = roles.has(rel) ? "field:" + roles.get(rel) : "col:" + (label || "#" + rel);
+        const n = (seen.get(key) || 0) + 1; seen.set(key,n); result.set(JSON.stringify([key,n]),c);
+      }
+      return result;
+    }
+    const existing = columns(dst,base), mapping = [];
+    for (const [key,c] of columns(src,source)) {
+      let to = existing.get(key);
+      if (to === undefined) {
+        to = ++dst.range.e.c;
+        const header = src.ws[addr(src.range.s.r + source.headerRow,c)];
+        if (header) dst.ws[addr(dst.range.s.r + base.headerRow,to)] = header;
+      }
+      mapping.push([c,to]);
+    }
+    if (dst.range.e.r + additions.length >= 1048576 || dst.range.e.c >= 16384) throw Error("Сборка превышает размер листа Excel.");
+    for (const row of additions) {
+      const to = ++dst.range.e.r;
+      for (const [from,col] of mapping) {
+        const cell = src.ws[addr(src.range.s.r + row.r,from)];
+        if (cell) dst.ws[addr(to,col)] = cell;
+      }
+      pairs.set(row.r,to - dst.range.s.r);
+    }
+    dst.ws["!ref"] = XLSX.utils.encode_range(dst.range);
+    return parseWorkbook(XLSX.write(dst.wb,{type:"array",bookType:"xlsx",compression:true}),base.fileName);
+  }
+
+  function combineJobs(base,source,append) {
+    const pairs = pairJobs(source,base);
+    const additions = append ? source.allRows.filter(r => !pairs.has(r.r)) : [];
+    const result = { ...base, kizT:{...base.kizT}, removed:{...base.removed} };
+    if (additions.length) {
+      const book = appendJobRows(base,source,additions,pairs);
+      Object.assign(result,{b64:book.b64,fileId:book.fileId,cols:book.cols,allRows:book.allRows});
+    } else result.allRows = base.allRows.map(r => ({...r}));
+    const byRow = new Map(result.allRows.map(r => [r.r,r]));
+    for (const r of base.allRows) byRow.get(r.r).kiz = r.kiz;
+    for (const r of source.allRows) {
+      const row = byRow.get(pairs.get(r.r));
+      if (!row) continue;
+      const t = source.kizT[r.r] || (r.kiz ? 1 : 0), old = result.kizT[row.r] || (row.kiz ? 1 : 0);
+      if (t > old || (t && t === old && r.kiz > row.kiz)) {
+        row.kiz = r.kiz; result.kizT[row.r] = t;
+      }
+      const del = source.removed[r.r], prior = result.removed[row.r];
+      if (del && (!prior || del.t > prior.t || (del.t === prior.t && del.on))) result.removed[row.r] = del;
+    }
+    applyRemoved(result);
+    return { result, added:additions.length };
+  }
+
+  function importWorkbook(shop, buf, fileName, reset) {
+    const input = Object.assign(emptyShop(shop.id),parseWorkbook(buf,fileName));
+    mergeOtherTab(shop);
+    const time = Math.max(Date.now(),(shop.fileT || 0) + 1);
+    let next = input, added = input.rows.length;
+    if (reset && !shop.demo) {
+      if (!window.confirm(shop.label + ": начать новую сборку из файла «" + fileName + "»? Текущие задания и собранные КИЗ этого магазина будут заменены содержимым файла.")) return null;
+      const stamp = Math.max(time,Number((shop.resetId || "").split("-")[0]) + 1);
+      next.resetId = String(stamp).padStart(16,"0") + "-" + uuid();
+    } else if (!shop.demo) {
+      ({ result:next,added } = combineJobs(shop,input,true));
+    }
+    Object.assign(next,{kizMode:shop.kizMode,fileT:time,cumulative:true});
     const seen = new Map();
     for (const other of shops) if (other !== shop && !other.demo) {
       for (const r of other.rows) if (r.kiz) seen.set(kizKey(r.kiz), other.label);
     }
-    forMatchingRows(next, shop, (row, old) => {
-      if (old.kiz || shop.kizT[old.r]) {
-        row.kiz = old.kiz;
-        next.kizT[row.r] = shop.kizT[old.r] || next.fileT;
-      }
-      if (shop.removed[old.r]) next.removed[row.r] = shop.removed[old.r];
-    });
     for (const row of next.allRows) {
       if (!row.kiz || next.removed[row.r]?.on) continue;
       const key = kizKey(row.kiz);
@@ -1448,6 +1542,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     Object.assign(shop, next);
     shop.rows.forEach((r) => { if (r.kiz) learnGtin(r.kiz, r.article, r.name); });
     scheduleSync();
+    return { added, repeated:input.allRows.length-added };
   }
 
   // ---------- scanner input: layout-independent ----------
@@ -1554,8 +1649,8 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     const card = e.target.closest("[data-shop]");
     if (!card) return;
     const shop = shops[Number(card.dataset.shop)];
-    if (e.target.closest("[data-pick]")) {
-      importShop = shop; picking = true; $("file").click();
+    if (e.target.closest("[data-pick],[data-reset]")) {
+      importReset = !!e.target.closest("[data-reset]"); importShop = shop; picking = true; $("file").click();
       setTimeout(() => { picking = false; }, 60000);
     } else if (e.target.closest("[data-docs]")) {
       chooseDocShop(shop); $("shopdocs").scrollIntoView({ block: "start" });
@@ -1898,8 +1993,8 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       return '<article class="shopcard' + (shop.demo ? " empty" : "") + '" data-shop="' + shop.id + '"><div class="shopmeta"><strong>' + shop.label + '</strong>' +
         '<span class="file filename" title="' + esc(shop.fileName) + '">' + (shop.demo ? "Нет задания" : "<bdi>" + esc(shop.fileName) + "</bdi>") + '</span>' +
         (shop.demo ? "" : '<span class="file shopcount">Собрано ' + filled + ' из ' + shop.rows.length + '</span>') +
-        '</div><div class="gbtns"><button type="button" data-pick>' + (shop.demo ? 'Загрузить Excel' : 'Обновить') + '</button>' +
-        (shop.demo ? "" : '<button type="button" data-docs>Файлы</button>') + '</div></article>';
+        '</div><div class="gbtns"><button type="button" data-pick>' + (shop.demo ? 'Загрузить Excel' : 'Дополнить задание') + '</button>' +
+        (shop.demo ? "" : '<button type="button" data-docs>Файлы</button><button type="button" data-reset>Загрузить со сбросом</button>') + '</div></article>';
     }).join("");
     $("scopelabel").hidden = loaded.length < 2;
     $("scope").value = scope;
@@ -2275,19 +2370,21 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     picking = false;
     const f = e.target.files && e.target.files[0];
     if (!f) return;
-    try {
-      const shop = importShop;
-      pendingImports.set(shop, f);
-      const buf = await f.arrayBuffer();
-      if (pendingImports.get(shop) !== f) return;
-      importWorkbook(shop, buf, f.name);
+    const shop = importShop, reset = importReset;
+    e.target.value = ""; importReset = false;
+    // A second selection may arrive before the first Excel file has finished reading.
+    const previous = pendingImports.get(shop) || Promise.resolve();
+    const task = previous.then(async () => {
+      const info = importWorkbook(shop, await f.arrayBuffer(), f.name, reset);
+      if (!info) return;
       render();
       const filled = shop.rows.filter((r) => r.kiz).length;
-      note("ok", shop.label + ". Загружено заданий: " + shop.rows.length + ", с КИЗ: " + filled + ".");
-    } catch (err) {
-      fail(err.message || "Не удалось прочитать файл.");
-    }
-    e.target.value = "";
+      note("ok",shop.label + ". Добавлено: " + info.added + (info.repeated ? " · уже в сборке: " + info.repeated : "") +
+        ". Собрано " + filled + " из " + shop.rows.length + ".");
+    }).catch(err => fail(err.message || "Не удалось прочитать файл."));
+    pendingImports.set(shop, task);
+    await task;
+    if (pendingImports.get(shop) === task) pendingImports.delete(shop);
     scan.focus();
   });
 
@@ -2352,18 +2449,16 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     if (ws["!merges"]) ws["!merges"] = ws["!merges"].filter((m) => ![...del].some((d) => d >= m.s.r && d <= m.e.r)).map((m) => ({ s: { r: m.s.r - shift(m.s.r), c: m.s.c }, e: { r: m.e.r - shift(m.e.r), c: m.e.c } }));
   }
   function buildWbFile() {
-    const wb = XLSX.read(b64ToBuf(docShop.b64), { type: "array" });
-    const ws = wb.Sheets[docShop.sheetName];
+    const {wb,ws,range} = wbSheet(docShop);
     docShop.rows.forEach((r) => {
-      const addr = XLSX.utils.encode_cell({ r: r.r, c: docShop.cols.kiz });
+      const addr = XLSX.utils.encode_cell({ r:range.s.r+r.r, c:range.s.c+docShop.cols.kiz });
       const val = !r.kiz ? "" : docShop.kizMode === "short" ? kizKey(r.kiz) : docShop.kizMode === "nogs" ? normKiz(r.kiz) : withGS(r.kiz);
       if (val) ws[addr] = { t: "s", v: val };
       else delete ws[addr];
     });
-    const range = XLSX.utils.decode_range(ws["!ref"]);
-    range.e.c = Math.max(range.e.c, docShop.cols.kiz);
+    range.e.c = Math.max(range.e.c, range.s.c + docShop.cols.kiz);
     ws["!ref"] = XLSX.utils.encode_range(range);
-    deleteSheetRows(ws, Object.keys(docShop.removed || {}).filter((k) => docShop.removed[k].on).map(Number));
+    deleteSheetRows(ws, Object.keys(docShop.removed || {}).filter((k) => docShop.removed[k].on).map(k => range.s.r + Number(k)));
     const out = fixGsEscapes(XLSX.write(wb, { bookType: "xlsx", type: "array" }));
     return { name: docShop.label + " " + docShop.fileName.replace(/\.xlsx?$/i, "") + ".xlsx", out };
   }
@@ -2438,7 +2533,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     const kiz = {};
     shop.allRows.forEach((r) => { if (r.kiz || shop.kizT[r.r]) kiz[r.r] = { v: r.kiz || "", t: shop.kizT[r.r] || 1 }; });
     const { fileId, fileName, b64, removed } = shop;
-    return { fileId, fileT: shop.fileT || 1, fileName, b64, kiz, removed };
+    return { fileId, fileT:shop.fileT || 1, fileName, b64, kiz, removed, resetId:shop.resetId || "", cumulative:!!shop.cumulative };
   }
   function localDoc() {
     return {
@@ -2460,7 +2555,10 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       return change || removed;
     }
     const remoteT = remote.fileT || 1, localT = shop.fileT || 1;
-    if (!shop.demo && remote.fileId === shop.fileId) {
+    const resetId = remote.resetId || "", localReset = shop.resetId || "";
+    if (!shop.demo && resetId < localReset) return;
+    if (!shop.demo && resetId === localReset && remote.fileId === shop.fileId) {
+      shop.cumulative = !!(shop.cumulative || remote.cumulative);
       let changed = false;
       for (const row of shop.allRows) {
         const entry = remote.kiz?.[row.r];
@@ -2473,17 +2571,17 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     const codes = {}, times = {};
     for (const [r, e] of Object.entries(remote.kiz || {})) { codes[r] = e.v; times[r] = e.t || 1; }
     const incoming = Object.assign(parseWorkbook(b64ToBuf(remote.b64), remote.fileName, codes), {
-      fileId: remote.fileId, fileT: remoteT, kizT: times, removed: Object.assign({}, remote.removed)
+      fileId:remote.fileId, fileT:remoteT, kizT:times, removed:{...remote.removed}, resetId, cumulative:!!remote.cumulative
     });
-    const newer = shop.demo || remoteT > localT || (remoteT === localT && remote.fileId > shop.fileId);
-    const target = newer ? incoming : shop, source = newer ? shop : incoming;
-    let changed = false;
-    // A second device may have scanned an existing sticker while the first refreshed its workbook.
-    forMatchingRows(target, source, (row, old) => {
-      if (mergeEdits(target, row, old.kiz, source.kizT[old.r] || 0, source.removed[old.r])) changed = true;
-    });
-    if (newer) Object.assign(shop, incoming);
-    if (newer || changed) { shop.selected = null; shop.history = []; applyRemoved(shop); }
+    if (shop.demo || resetId > localReset) {
+      Object.assign(shop,incoming); applyRemoved(shop); return;
+    }
+    const newer = remoteT > localT || (remoteT === localT && remote.fileId > shop.fileId);
+    const base = newer ? incoming : shop, other = newer ? shop : incoming;
+    const cumulative = !!(base.cumulative || other.cumulative);
+    const { result } = combineJobs(base,other,cumulative);
+    Object.assign(shop,result,{cumulative,selected:null,history:[]});
+
   }
   function mergeReq(shop, remote) {
     if (!remote || (remote.t || 0) <= (readReq(shop).t || 0)) return;
