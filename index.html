@@ -328,6 +328,11 @@ body { margin: 0; }
 .shopdocs label { display: grid; gap: 4px; min-width: 0; max-width: 100%; color: var(--muted); font-size: 13px; }
 .shopdocs label select { width: 100%; color: var(--ink); }
 .shopmeta { display: grid; gap: 4px; min-width: 0; }
+.shopcard button.shopname { justify-self: start; text-align: left; border: 0; padding: 0 5px 0 0; background: transparent; color: var(--ink); gap: 7px; max-width: 100%; }
+.shopname strong { overflow-wrap: anywhere; }
+.shopname span { color: var(--muted); }
+#rows .variant { overflow-wrap: anywhere; }
+#rows .variant small { color: var(--muted); font-size: 12px; }
 @media (max-width: 640px) {
   body[data-mode="fbs"] header { display: block; position: relative; }
   body[data-mode="fbs"] header .actions { display: contents; }
@@ -380,6 +385,7 @@ body { margin: 0; }
   #rows .num:first-child::before { content: "Задание"; }
   #rows .num:nth-child(2)::before { content: "Стикер"; }
   #rows td:nth-child(n+3) { grid-column: 1 / -1; }
+  #rows td.variant { grid-column: auto; grid-row: 2; }
   #rows .name { font-weight: 600; }
   #rows .name small { font-weight: 400; }
   #rows .acts { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -570,7 +576,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
   <button type="button" class="donetoggle fbsonly mobonly" id="donetoggle" hidden></button>
   <div class="tablebox fbsonly">
     <table>
-      <thead><tr><th>№ задания</th><th>Стикер</th><th>Товар</th><th>Артикул</th><th>КИЗ</th><th></th></tr></thead>
+      <thead><tr><th>№ задания</th><th>Стикер</th><th>Товар</th><th>Артикул</th><th>Размер</th><th>КИЗ</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
@@ -579,6 +585,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
   <div class="msg err fbsonly" id="conflictwarn" role="alert" hidden></div>
   <section class="shopdocs fbsonly" id="shopdocs" hidden>
     <h2>Файлы магазина</h2>
+    <input type="file" id="sizefile" class="vh" tabindex="-1" accept=".pdf,application/pdf">
     <select id="docshop" aria-label="Магазин для выгрузки"><option value="0">Магазин 1</option><option value="1">Магазин 2</option></select>
       <button id="export" class="primary fbsonly" type="button" disabled>Скачать Excel для WB</button>
       <button id="share" type="button" class="fbsonly" hidden disabled>Отправить файл</button>
@@ -682,9 +689,23 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
   const $ = (id) => document.getElementById(id);
   const scan = $("scan");
 
+  const shopNames = [null, null];
+  const shopNameKey = id => "kiz-wb-shop-name-" + id;
+
+  function storeShopName(id, entry, write) {
+    if (!entry || typeof entry.v !== "string" || !Number.isFinite(entry.t)) return;
+    const value = entry.v.trim().slice(0, 60);
+    const old = shopNames[id];
+    if (!value || (old && (old.t > entry.t || (old.t === entry.t && old.v >= value)))) return;
+    const name = {v:value, t:entry.t};
+    if (write) localStorage.setItem(shopNameKey(id), JSON.stringify(name));
+    shopNames[id] = name;
+    shops[id].label = value;
+  }
+
   function emptyShop(id) {
-    return { id, label: "Магазин " + (id + 1), demo: true, fileName: "", b64: "", sheetName: "",
-      resetId: "", cumulative: false, cols: {}, rows: [], allRows: [], selected: null, history: [], kizMode: "full", kizT: {}, removed: {} };
+    return { id, label: shopNames[id]?.v || "Магазин " + (id + 1), demo: true, fileName: "", b64: "", sheetName: "",
+      resetId: "", cumulative: false, sizes: {}, cols: {}, rows: [], allRows: [], selected: null, history: [], kizMode: "full", kizT: {}, removed: {} };
   }
   const shops = [emptyShop(0), emptyShop(1)];
   let state = shops[0]; // shop owning the current scan
@@ -726,7 +747,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
 
   const DEMO_ROWS = [
     { r: 1, order: "1000000001", sticker: "10000000011234", brand: "Пример", name: "Шапка (пример)", article: "demo-hat", kiz: "" },
-    { r: 2, order: "1000000002", sticker: "10000000025678", brand: "Пример", name: "Платье (пример)", article: "demo-dress", kiz: "" },
+    { r: 2, order: "1000000002", sticker: "10000000025678", brand: "Пример", name: "Платье (пример)", article: "demo-dress", size: "44–46", kiz: "" },
     { r: 3, order: "1000000003", sticker: "10000000039012", brand: "Пример", name: "Шапка (пример)", article: "demo-hat", kiz: "0104601234567890215ABCdef!" + GS + "93XyZ1" }
   ];
 
@@ -1333,8 +1354,8 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     mergeOtherTab(shop);
     const kiz = {};
     shop.allRows.forEach((r) => { if (r.kiz || shop.kizT[r.r]) kiz[r.r] = r.kiz; });
-    const { fileName, b64, kizMode, kizT, fileT, fileId, removed, resetId, cumulative } = shop;
-    const text = JSON.stringify({ fileName, b64, kiz, kizMode, kizT, fileT, fileId, removed, resetId, cumulative });
+    const { fileName, b64, kizMode, kizT, fileT, fileId, removed, resetId, cumulative, sizes } = shop;
+    const text = JSON.stringify({ fileName, b64, kiz, kizMode, kizT, fileT, fileId, removed, resetId, cumulative, sizes });
     localStorage.setItem(shopKey(STORE, shop),text); savedShopText.set(shop.id,text);
   }
   function save(shop = state) {
@@ -1353,6 +1374,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       Object.keys(s.kizT || {}).forEach((r) => { if (!(r in values)) values[r] = ""; });
       Object.assign(shop, parseWorkbook(b64ToBuf(s.b64), s.fileName, values));
       shop.kizT = s.kizT || {}; shop.removed = s.removed || {}; shop.fileT = s.fileT || 0;
+      shop.sizes = s.sizes || {};
       shop.resetId = s.resetId || ""; shop.cumulative = !!s.cumulative;
       shop.kizMode = s.kizMode || "full";
       applyRemoved(shop);
@@ -1401,7 +1423,9 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       order: findCol(header, ["задани"]),
       brand: findCol(header, ["бренд"]),
       name: findCol(header, ["наименование"]),
-      article: findCol(header, ["артикул"])
+      article: findCol(header, ["артикул продавца"]) >= 0 ? findCol(header, ["артикул продавца"]) : findCol(header, ["артикул"]),
+      size: header.findIndex(h => /^(?:размер(?: (?:товара|изделия|одежды|производителя|на бирке|рос|ru|рф|российский))?|(?:российский|технический|тех) размер|techsize|size)$/.test(
+        String(h ?? "").toLowerCase().replace(/[().,:_–-]/g, " ").replace(/\s+/g, " ").trim()))
     };
     const cell = (row, c) => (c >= 0 && row[c] != null ? String(row[c]).trim() : "");
     const rows = [];
@@ -1411,7 +1435,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       if (!sticker) continue;
       rows.push({
         r, sticker, order: cell(row, cols.order), brand: cell(row, cols.brand),
-        name: cell(row, cols.name), article: cell(row, cols.article),
+        name: cell(row, cols.name), article: cell(row, cols.article), size: cell(row, cols.size),
         kiz: normKiz(kizOverride && kizOverride[r] != null ? kizOverride[r] : cell(row, cols.kiz))
       });
     }
@@ -1489,10 +1513,21 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     return parseWorkbook(XLSX.write(dst.wb,{type:"array",bookType:"xlsx",compression:true}),base.fileName);
   }
 
+  function applySize(sizes, row, entry) {
+    if (!entry || typeof entry.v !== "string" || !entry.v.trim() || !Number.isFinite(entry.t)) return;
+    const old = sizes[row];
+    if (!old || entry.t > old.t || (entry.t === old.t && entry.v > old.v)) sizes[row] = entry;
+  }
+
+  const sizeOf = (shop, row) => shop.sizes?.[row.r]?.v || row.size || "";
+  function variant(shop, row) {
+    const size = sizeOf(shop,row);
+    return (row.article || rowLabel(row)) + (size ? " · размер " + size : "");
+  }
   function combineJobs(base,source,append) {
     const pairs = pairJobs(source,base);
     const additions = append ? source.allRows.filter(r => !pairs.has(r.r)) : [];
-    const result = { ...base, kizT:{...base.kizT}, removed:{...base.removed} };
+    const result = { ...base, sizes:{...base.sizes}, kizT:{...base.kizT}, removed:{...base.removed} };
     if (additions.length) {
       const book = appendJobRows(base,source,additions,pairs);
       Object.assign(result,{b64:book.b64,fileId:book.fileId,cols:book.cols,allRows:book.allRows});
@@ -1502,6 +1537,9 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     for (const r of source.allRows) {
       const row = byRow.get(pairs.get(r.r));
       if (!row) continue;
+      const sourceSize = source.sizes?.[r.r];
+      if (sourceSize) applySize(result.sizes, row.r, sourceSize);
+      else if (!row.size && r.size) applySize(result.sizes, row.r, {v:r.size, t:1});
       const t = source.kizT[r.r] || (r.kiz ? 1 : 0), old = result.kizT[row.r] || (row.kiz ? 1 : 0);
       if (t > old || (t && t === old && r.kiz > row.kiz)) {
         row.kiz = r.kiz; result.kizT[row.r] = t;
@@ -1649,13 +1687,87 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     const card = e.target.closest("[data-shop]");
     if (!card) return;
     const shop = shops[Number(card.dataset.shop)];
-    if (e.target.closest("[data-pick],[data-reset]")) {
+    if (e.target.closest("[data-rename]")) {
+      const value = window.prompt("Название магазина", shop.label)?.trim();
+      if (!value || value === shop.label) return;
+      if (value.length > 60) return fail("Введите название длиной до 60 символов.");
+      try { storeShopName(shop.id, {v:value, t:Math.max(Date.now(), (shopNames[shop.id]?.t || 0) + 1)}, true); }
+      catch { return fail("Не удалось сохранить название магазина."); }
+      render(); scheduleSync();
+    } else if (e.target.closest("[data-sizes]")) {
+      sizeShop = shop; $("sizefile").click();
+    } else if (e.target.closest("[data-pick],[data-reset]")) {
       importReset = !!e.target.closest("[data-reset]"); importShop = shop; picking = true; $("file").click();
       setTimeout(() => { picking = false; }, 60000);
     } else if (e.target.closest("[data-docs]")) {
       chooseDocShop(shop); $("shopdocs").scrollIntoView({ block: "start" });
     }
   });
+  let sizeShop;
+  $("sizefile").addEventListener("change", async e => {
+    const file = e.target.files[0], shop = sizeShop;
+    e.target.value = "";
+    if (!file || !shop || shop.demo) return;
+    const generation = shop.resetId;
+    try {
+      note("warn", "Читаю размеры из листа подбора…");
+      const items = await pickingSizes(file);
+      mergeOtherTab(shop);
+      if (generation !== shop.resetId) throw Error("Сборка изменилась. Выберите лист подбора ещё раз.");
+      const sizes = {...shop.sizes};
+      let matched = 0;
+      for (const row of shop.allRows) {
+        const item = items.get(row.sticker);
+        if (!item || (row.order && row.order !== item.order)) continue;
+        applySize(sizes, row.r, {v:item.size, t:Math.max(Date.now(), (sizes[row.r]?.t || 0) + 1)});
+        matched++;
+      }
+      if (!matched) throw Error("В листе подбора нет размеров для заказов этого магазина. Проверьте поставку.");
+      const next = {...shop, sizes};
+      persist(next); Object.assign(shop,next); render(); scheduleSync();
+      note("ok", shop.label + ". Размеры загружены для заданий: " + matched + ".");
+    } catch (err) { fail(err.message || "Не удалось загрузить размеры."); }
+  });
+
+  async function pickingSizes(file) {
+    const base = "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/build/";
+    let pdfjs;
+    try { pdfjs = await import(base + "pdf.mjs"); }
+    catch { throw Error("Не удалось открыть модуль PDF. Проверьте интернет и повторите загрузку."); }
+    pdfjs.GlobalWorkerOptions.workerSrc = base + "pdf.worker.mjs";
+    const task = pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer()), isEvalSupported:false});
+    const items = new Map();
+    try {
+      const pdf = await task.promise;
+      for (let page = 1; page <= pdf.numPages; page++) {
+        const content = await (await pdf.getPage(page)).getTextContent();
+        const words = content.items.filter(w => w.str?.trim()).map(w => ({
+          text:w.str.trim().replace(/\s+/g," "), x:w.transform[4], y:w.transform[5]
+        }));
+        const job = words.find(w => w.text === "№ задания");
+        const header = job && words.filter(w => Math.abs(w.y-job.y)<2).sort((a,b) => a.x-b.x);
+        if (!header || !["Размер","Стикер"].every(h => header.some(w => w.text === h)))
+          throw Error("Выберите исходный PDF «Лист подбора» из кабинета WB.");
+        const jobs = words.filter(w => Math.abs(w.x-job.x)<2 && w.y<job.y && /^\d{7,}$/.test(w.text)).sort((a,b) => b.y-a.y);
+        for (const [i, entry] of jobs.entries()) {
+          const bottom = jobs[i+1]?.y ?? -Infinity;
+          const row = words.filter(w => w.y <= entry.y+3 && w.y > bottom+3).sort((a,b) => b.y-a.y || a.x-b.x);
+          function field(label) {
+            const n = header.findIndex(w => w.text === label);
+            return row.filter(w => w.x >= header[n].x-0.5 && w.x < (header[n+1]?.x ?? Infinity)-0.5)
+              .map(w => w.text).join(" ").trim();
+          }
+          const sticker = field("Стикер").replace(/\s/g,""), size = field("Размер");
+          if (!size || !/^\d+$/.test(sticker)) continue;
+          const old = items.get(sticker);
+          if (old && (old.order !== entry.text || old.size !== size)) throw Error("В PDF разные данные для стикера " + sticker + ".");
+          items.set(sticker,{order:entry.text,size});
+        }
+      }
+      return items;
+    } finally { await task.destroy(); }
+  }
+
   $("scope").addEventListener("change", (e) => {
     scope = e.target.value; state.selected = null; hideMsg(); render(); scan.focus({ preventScroll: true });
   });
@@ -1759,7 +1871,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     if (tr) tr.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     if (row.kiz) note("warn", "У задания " + rowLabel(row) + " уже есть КИЗ. Новый скан КИЗ заменит его.");
     else hideMsg();
-    if (fromScan) { beep("barcode"); flash("info", "→", row.article || "Задание " + row.order, state.label + " · теперь КИЗ"); }
+    if (fromScan) { beep("barcode"); flash("info", "→", variant(state,row), state.label + " · теперь КИЗ"); }
     scan.focus({ preventScroll: true });
   }
 
@@ -1791,7 +1903,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     const completed = !replaced && left === 0;
     const hundredS = !replaced && doneN % 100 === 0;
     if (hundredS) flash("ok", "★", "Собрано " + doneN + " шт.!", left ? "Осталось " + left : "Все задания собраны");
-    else flash("ok", "✓", row.article || rowLabel(row), left ? "Осталось " + left : "Все задания собраны");
+    else flash("ok", "✓", variant(state,row), left ? "Осталось " + left : "Все задания собраны");
     note("ok", (replaced ? "КИЗ заменён: " : "КИЗ записан: ") + state.label + ", " + rowLabel(row) + ", " + (row.article || "") +
       (left ? ". Осталось " + left + ". Сканируйте следующий стикер." : ". Все задания заполнены, можно скачивать файл."));
     beep(completed ? "complete" : hundredS ? "hundred" : "kiz");
@@ -1984,19 +2096,23 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     const gone = visible.flatMap((shop) => shop.allRows.filter((r) => shop.removed[r.r]?.on).map((r) => ({ shop, r })));
     $("removedbox").hidden = !gone.length;
     $("removedbox").innerHTML = gone.length ? "<b>Удалённые задания (" + gone.length + ")</b>" + gone.map(({ shop, r }) =>
-      '<div class="rrow"><span>' + shop.label + " · " + esc(rowLabel(r)) + " · стикер " + esc(r.sticker) + " · " + esc(r.article || "") + (r.kiz ? " · с КИЗ" : "") + '</span><button type="button" data-shop="' + shop.id + '" data-restore="' + r.r + '">Вернуть</button></div>').join("") : "";
+      '<div class="rrow"><span>' + esc(shop.label) + " · " + esc(rowLabel(r)) + " · стикер " + esc(r.sticker) + " · " + esc(r.article || "") + (r.kiz ? " · с КИЗ" : "") + '</span><button type="button" data-shop="' + shop.id + '" data-restore="' + r.r + '">Вернуть</button></div>').join("") : "";
     const rows = displayed.flatMap((shop) => shop.rows);
     const done = rows.filter((r) => r.kiz).length, total = rows.length;
     $("shops").dataset.loaded = loaded.length;
     $("shops").innerHTML = shops.map((shop) => {
       const filled = shop.rows.filter((r) => r.kiz).length;
-      return '<article class="shopcard' + (shop.demo ? " empty" : "") + '" data-shop="' + shop.id + '"><div class="shopmeta"><strong>' + shop.label + '</strong>' +
+      return '<article class="shopcard' + (shop.demo ? " empty" : "") + '" data-shop="' + shop.id + '"><div class="shopmeta"><button class="shopname" type="button" data-rename title="Переименовать магазин" aria-label="Переименовать магазин: ' + esc(shop.label) + '"><strong>' + esc(shop.label) + '</strong><span aria-hidden="true">✎</span></button>' +
         '<span class="file filename" title="' + esc(shop.fileName) + '">' + (shop.demo ? "Нет задания" : "<bdi>" + esc(shop.fileName) + "</bdi>") + '</span>' +
         (shop.demo ? "" : '<span class="file shopcount">Собрано ' + filled + ' из ' + shop.rows.length + '</span>') +
         '</div><div class="gbtns"><button type="button" data-pick>' + (shop.demo ? 'Загрузить Excel' : 'Дополнить задание') + '</button>' +
-        (shop.demo ? "" : '<button type="button" data-docs>Файлы</button><button type="button" data-reset>Загрузить со сбросом</button>') + '</div></article>';
+        (shop.demo ? "" : '<button type="button" data-docs>Файлы</button><button type="button" data-sizes>Размеры из PDF</button><button type="button" data-reset>Загрузить со сбросом</button>') + '</div></article>';
     }).join("");
     $("scopelabel").hidden = loaded.length < 2;
+    for (const shop of shops) {
+      $("scope").options[shop.id + 1].textContent = shop.label;
+      $("docshop").options[shop.id].textContent = shop.label;
+    }
     $("scope").value = scope;
     $("bigstat").hidden = true; // FBO uses this panel for its box counters.
     const complete = !demo && total > 0 && done === total;
@@ -2037,8 +2153,8 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     } else {
       const r = state.rows[state.selected];
       step.className = "step kiz";
-      step.innerHTML = '<div class="badge">2</div><div class="title">Сканируйте КИЗ для ' + esc(r.article || "товара") + "</div>" +
-        '<div class="sub"><b>' + state.label + '</b> · ' + esc(r.name) + ' · задание <b class="mono">' + esc(r.order) + '</b> · стикер <b class="mono">' + esc(r.sticker) + "</b></div>";
+      step.innerHTML = '<div class="badge">2</div><div class="title">Сканируйте КИЗ для ' + esc(variant(state,r)) + "</div>" +
+        '<div class="sub"><b>' + esc(state.label) + '</b> · ' + esc(r.name) + ' · задание <b class="mono">' + esc(r.order) + '</b> · стикер <b class="mono">' + esc(r.sticker) + "</b></div>";
     }
 
     renderUpd();
@@ -2049,8 +2165,9 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       return '<tr data-shop="' + shop.id + '" data-i="' + i + '" class="' + cls + '">' +
         '<td class="num">' + esc(r.order) + "</td>" +
         '<td class="num">' + stickerHtml(r.sticker) + "</td>" +
-        '<td class="name">' + esc(r.name) + (loaded.length > 1 ? "<small>" + shop.label + "</small>" : "") + (r.brand ? "<small>" + esc(r.brand) + "</small>" : "") + "</td>" +
-        "<td>" + esc(r.article) + "</td>" +
+        '<td class="name">' + esc(r.name) + (loaded.length > 1 ? "<small>" + esc(shop.label) + "</small>" : "") + (r.brand ? "<small>" + esc(r.brand) + "</small>" : "") + "</td>" +
+        '<td class="variant"><small class="mobonly">Артикул</small><b>' + esc(r.article || "—") + "</b></td>" +
+        '<td class="variant"><small class="mobonly">Размер</small><b>' + esc(sizeOf(shop,r) || "—") + "</b></td>" +
         '<td class="kizcell" title="' + esc(r.kiz.split(GS).join("␝")) + '">' +
           (r.kiz ? kizHtml(r.kiz) : '<span class="chip wait">ждёт КИЗ</span>') + "</td>" +
         '<td class="acts">' + (r.kiz ? '<button class="x" type="button" data-edit="' + i + '" aria-label="Изменить КИЗ" title="Изменить КИЗ">✎</button><button class="x" type="button" data-clear="' + i + '" aria-label="Удалить КИЗ" title="Удалить КИЗ">×</button>' : "") +
@@ -2283,7 +2400,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       filename = "Коды " + safe + " (" + codes.length + " шт).xlsx";
     }
     try {
-      if (mode === "fbs") filename = docShop.label + " " + filename;
+      if (mode === "fbs") filename = shopFileLabel(docShop) + " " + filename;
       await downloads.save({ filename, data });
       note("ok", "Сохранено: " + filename + ". В СБИС откройте строку " + g.article + " → Коды → «загрузить из файла».");
     } catch (err) {
@@ -2334,7 +2451,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       XLSX.utils.book_append_sheet(wb, ws, "Коды маркировки");
       XLSX.utils.book_append_sheet(wb, ws2, "Итого по артикулам");
       const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-      const name = "Коды для УПД " + (mode === "fbo" ? "FBO " + stamp() : docShop.label + " " + docShop.fileName.replace(/\.xlsx?$/i, "")) + ".xlsx";
+      const name = "Коды для УПД " + (mode === "fbo" ? "FBO " + stamp() : shopFileLabel(docShop) + " " + docShop.fileName.replace(/\.xlsx?$/i, "")) + ".xlsx";
       if (!downloads) return fail("Скачивание недоступно в этом браузере.");
       await downloads.save({ filename: name, data: new Blob([out]) });
       note("ok", "Файл с кодами для УПД сохранён.");
@@ -2448,6 +2565,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     if (ws["!rows"]) ws["!rows"] = ws["!rows"].filter((_, i) => !del.has(i));
     if (ws["!merges"]) ws["!merges"] = ws["!merges"].filter((m) => ![...del].some((d) => d >= m.s.r && d <= m.e.r)).map((m) => ({ s: { r: m.s.r - shift(m.s.r), c: m.s.c }, e: { r: m.e.r - shift(m.e.r), c: m.e.c } }));
   }
+  function shopFileLabel(shop) { return shop.label.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_"); }
   function buildWbFile() {
     const {wb,ws,range} = wbSheet(docShop);
     docShop.rows.forEach((r) => {
@@ -2460,7 +2578,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     ws["!ref"] = XLSX.utils.encode_range(range);
     deleteSheetRows(ws, Object.keys(docShop.removed || {}).filter((k) => docShop.removed[k].on).map(k => range.s.r + Number(k)));
     const out = fixGsEscapes(XLSX.write(wb, { bookType: "xlsx", type: "array" }));
-    return { name: docShop.label + " " + docShop.fileName.replace(/\.xlsx?$/i, "") + ".xlsx", out };
+    return { name: shopFileLabel(docShop) + " " + docShop.fileName.replace(/\.xlsx?$/i, "") + ".xlsx", out };
   }
   $("export").addEventListener("click", async () => {
     try {
@@ -2533,11 +2651,11 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     const kiz = {};
     shop.allRows.forEach((r) => { if (r.kiz || shop.kizT[r.r]) kiz[r.r] = { v: r.kiz || "", t: shop.kizT[r.r] || 1 }; });
     const { fileId, fileName, b64, removed } = shop;
-    return { fileId, fileT:shop.fileT || 1, fileName, b64, kiz, removed, resetId:shop.resetId || "", cumulative:!!shop.cumulative };
+    return { fileId, fileT:shop.fileT || 1, fileName, b64, kiz, removed, sizes:shop.sizes, resetId:shop.resetId || "", cumulative:!!shop.cumulative };
   }
   function localDoc() {
     return {
-      v: 1, fbs: shopDoc(shops[0]),
+      v: 1, shopNames, fbs: shopDoc(shops[0]),
       fbo: { epoch: fbo.epoch, del: fbo.del, items: fbo.items.map((it) => ({ kiz: it.kiz, box: it.box, gtin: it.gtin, barcode: it.barcode || "", t: it.t || 1, ...(it.boxT ? { boxT: it.boxT } : {}) })) },
       gtin: gtinMap, bc: bcMap, boxnum: boxNumMap, req: readReq(shops[0]),
       second: { fbs: shopDoc(shops[1]), req: readReq(shops[1]) }, ozon: ozon.outgoing()
@@ -2561,6 +2679,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
       shop.cumulative = !!(shop.cumulative || remote.cumulative);
       let changed = false;
       for (const row of shop.allRows) {
+        applySize(shop.sizes, row.r, remote.sizes?.[row.r]);
         const entry = remote.kiz?.[row.r];
         if (mergeEdits(shop, row, entry?.v, entry?.t || 0, remote.removed?.[row.r])) changed = true;
       }
@@ -2571,7 +2690,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     const codes = {}, times = {};
     for (const [r, e] of Object.entries(remote.kiz || {})) { codes[r] = e.v; times[r] = e.t || 1; }
     const incoming = Object.assign(parseWorkbook(b64ToBuf(remote.b64), remote.fileName, codes), {
-      fileId:remote.fileId, fileT:remoteT, kizT:times, removed:{...remote.removed}, resetId, cumulative:!!remote.cumulative
+      sizes:{...remote.sizes}, fileId:remote.fileId, fileT:remoteT, kizT:times, removed:{...remote.removed}, resetId, cumulative:!!remote.cumulative
     });
     if (shop.demo || resetId > localReset) {
       Object.assign(shop,incoming); applyRemoved(shop); return;
@@ -2592,6 +2711,7 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
     if (!R || R.v !== 1) return;
     applyingRemote = true;
     try {
+      shops.forEach(shop => storeShopName(shop.id, R.shopNames?.[shop.id], true));
       mergeShop(shops[0], R.fbs);
       mergeShop(shops[1], R.second?.fbs);
       // FBO
@@ -3927,7 +4047,14 @@ body[data-mode="ozon"] #flash.warn { background: rgba(126, 82, 0, .94); }
   // ---------- boot ----------
   const ozon = createOzonStation();
   loadReq();
-  shops.forEach(restore);
+  shops.forEach(shop => {
+    try { storeShopName(shop.id, JSON.parse(localStorage.getItem(shopNameKey(shop.id))), false); } catch {}
+    restore(shop);
+  });
+  window.addEventListener("storage", e => {
+    const shop = shops.find(s => shopNameKey(s.id) === e.key);
+    if (shop && e.newValue) { storeShopName(shop.id, JSON.parse(e.newValue), false); render(); }
+  });
   if (shops.every((s) => s.demo)) shops[0].rows = DEMO_ROWS.map((r) => Object.assign({}, r));
   render();
   if (!matchMedia("(pointer: coarse)").matches) $("optsbox").open = true;
